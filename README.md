@@ -1,9 +1,9 @@
 # Databricks Agentic DE
 
 Project 2 of a two-part portfolio series (Snowflake + Databricks — Project 1
-is [`snowflake-ai-data-agent`](../snowflake-ai-data-agent), bank-card
-transactions, backed by Snowflake's no-code Cortex Analyst). This project
-takes the harder, more differentiated path: **healthcare, real-time
+is [`snowflake-ai-data-agent`](../snowflake-ai-data-agent), backed by
+Snowflake's no-code Cortex Analyst). This project takes the harder, more
+differentiated path: **healthcare, real-time
 patient/vitals monitoring**, with **one hand-built orchestrator agent** —
 not a vendor no-code tool — that does two jobs a real DE/DA team would
 otherwise split across people:
@@ -87,10 +87,15 @@ and in-process before any row reaches the orchestrator agent's LLM calls.
 ## Dataset sourcing
 
 The user-facing request behind this project was "download a dataset" — here
-that resolves to a small, real, **openly-licensed synthetic** sample under
-[`data/reference/synthea_sample/`](data/reference/synthea_sample/) (Synthea,
-Apache-2.0, MITRE, zero real PHI). **That file is a documented reference
-artifact only — the pipeline and simulator do not read it at runtime.**
+that resolves to a small, real, **openly-licensed synthetic** sample:
+[`synthea_sample_data_csv_latest.zip`](data/reference/synthea_sample/synthea_sample_data_csv_latest.zip)
+(100 synthetic patients, 18 CSVs, ~5.7 MB, downloaded from MITRE's official
+[Synthea downloads page](https://synthea.mitre.org/downloads) — zero real
+PHI, license and citation in
+[`data/reference/synthea_sample/SOURCE.md`](data/reference/synthea_sample/SOURCE.md)).
+**That file is a documented reference artifact only — the pipeline and
+simulator do not read it at runtime** (see `SOURCE.md` for the swap-in path
+if you want to build against it directly).
 
 The actual real-time stream is produced by this repo's own Python generator
 (`simulator/`), parameterized for scale (default 1,000, configurable to
