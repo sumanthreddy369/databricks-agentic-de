@@ -1,0 +1,31 @@
+# Databricks Asset Bundle job (Workflow) definitions.
+# Not deployed/validated against a real workspace in this environment.
+resources:
+  jobs:
+    reference_data_hourly:
+      name: reference_data_hourly
+      schedule:
+        quartz_cron_expression: "0 0 * * * ?" # top of every hour
+        timezone_id: UTC
+      tasks:
+        - task_key: run_reference_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.reference_data_pipeline.id}
+
+    # Runs agent/orchestrator.py in DE ("pipeline health") mode on a
+    # schedule so the agent proactively checks/self-heals the streaming
+    # pipeline even with no human watching. This job needs a real wheel
+    # build of this package plus a cluster with ANTHROPIC_API_KEY configured
+    # as a secret — it is described here for completeness but cannot be
+    # executed or validated in this local-only environment.
+    agent_pipeline_healthcheck:
+      name: agent_pipeline_healthcheck
+      schedule:
+        quartz_cron_expression: "0 */15 * * * ?" # every 15 minutes
+        timezone_id: UTC
+      tasks:
+        - task_key: run_de_healthcheck
+          python_wheel_task:
+            package_name: databricks_agentic_de
+            entry_point: orchestrator_healthcheck
+            parameters: ["--mode", "de"]

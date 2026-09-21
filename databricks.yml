@@ -1,0 +1,29 @@
+# Minimal Databricks Asset Bundle definition. Not deployed in this
+# environment — validated structurally only via
+# .github/workflows/bundle-validate.yml (which requires DATABRICKS_HOST /
+# DATABRICKS_TOKEN secrets and skips gracefully without them).
+bundle:
+  name: databricks-agentic-de
+
+include:
+  - resources/*.yml
+
+variables:
+  kafka_bootstrap_servers:
+    description: Bootstrap servers for the patient_events Kafka/Redpanda cluster.
+    default: localhost:19092
+  provider_landing_path:
+    description: Landing volume path Autoloader watches for provider roster batch files.
+    default: /Volumes/healthcare_agentic_de/landing/providers
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://REPLACE-WITH-YOUR-WORKSPACE.cloud.databricks.com
+
+  prod:
+    mode: production
+    workspace:
+      host: https://REPLACE-WITH-YOUR-WORKSPACE.cloud.databricks.com

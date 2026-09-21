@@ -1,0 +1,42 @@
+name: Bundle Validate
+
+# Validates the Databricks Asset Bundle (databricks.yml + resources/*.yml)
+# against a real workspace. Requires DATABRICKS_HOST/DATABRICKS_TOKEN repo
+# secrets pointing at a live workspace, which this portfolio project does not
+# have — the job checks for them first and skips gracefully rather than
+# failing CI when they're absent.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for Databricks credentials
+        id: creds
+        run: |
+          if [ -n "${{ secrets.DATABRICKS_HOST }}" ] && [ -n "${{ secrets.DATABRICKS_TOKEN }}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Databricks CLI
+        if: steps.creds.outputs.present == 'true'
+        uses: databricks/setup-cli@main
+
+      - name: Validate bundle
+        if: steps.creds.outputs.present == 'true'
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks bundle validate
+
+      - name: Skip (no workspace credentials configured)
+        if: steps.creds.outputs.present == 'false'
+        run: echo "DATABRICKS_HOST/DATABRICKS_TOKEN not set — skipping bundle validate."

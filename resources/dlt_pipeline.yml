@@ -1,0 +1,49 @@
+# Databricks Asset Bundle resource definitions for the two DLT pipelines.
+# Not deployed/validated against a real workspace in this environment — see
+# .github/workflows/bundle-validate.yml, which skips gracefully without
+# DATABRICKS_HOST/DATABRICKS_TOKEN secrets.
+resources:
+  pipelines:
+    streaming_patient_pipeline:
+      name: streaming_patient_pipeline
+      catalog: healthcare_agentic_de
+      target: silver
+      continuous: true
+      photon: true
+      configuration:
+        pipeline.kafka_bootstrap_servers: "${var.kafka_bootstrap_servers}"
+      libraries:
+        - file:
+            path: ../pipeline/01_ingest/kafka_patient_events.py
+        - file:
+            path: ../pipeline/02_bronze/bronze_patient_events.py
+        - file:
+            path: ../pipeline/03_silver/silver_encounters.py
+        - file:
+            path: ../pipeline/03_silver/silver_vitals.py
+        - file:
+            path: ../pipeline/04_gold/gold_encounters.py
+        - file:
+            path: ../pipeline/04_gold/gold_vitals.py
+
+    # Slow-changing reference data does not need a continuously-running
+    # cluster — running it as a triggered pipeline on an hourly Workflow
+    # (see resources/workflows.yml) is a deliberate cost/ops decision, not
+    # just "two files because there are two sources."
+    reference_data_pipeline:
+      name: reference_data_pipeline
+      catalog: healthcare_agentic_de
+      target: silver
+      continuous: false
+      photon: true
+      configuration:
+        pipeline.provider_landing_path: "${var.provider_landing_path}"
+      libraries:
+        - file:
+            path: ../pipeline/01_ingest/autoloader_provider_roster.py
+        - file:
+            path: ../pipeline/02_bronze/bronze_provider_roster.py
+        - file:
+            path: ../pipeline/03_silver/silver_providers.py
+        - file:
+            path: ../pipeline/04_gold/gold_providers.py
