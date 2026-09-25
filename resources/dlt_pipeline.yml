@@ -2,6 +2,13 @@
 # Not deployed/validated against a real workspace in this environment — see
 # .github/workflows/bundle-validate.yml, which skips gracefully without
 # DATABRICKS_HOST/DATABRICKS_TOKEN secrets.
+#
+# Target cloud is GCP (see databricks.yml's workspace host and
+# `provider_landing_path`'s gs:// default). `streaming_patient_pipeline`
+# reads from Kafka/Redpanda for local-dev parity; GCP Pub/Sub is the
+# cloud-native managed alternative to self-hosting Kafka for this same
+# continuous ingestion path (not swapped in here — see the
+# `kafka_bootstrap_servers` variable description in databricks.yml for why).
 resources:
   pipelines:
     streaming_patient_pipeline:

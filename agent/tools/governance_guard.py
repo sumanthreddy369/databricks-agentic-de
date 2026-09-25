@@ -6,13 +6,27 @@ central claim: PHI masking and prompt-injection defense are architectural,
 not just documented in a system prompt. See agent/orchestrator.py for how
 they're wired into dispatch(), and tests/test_masking_guard.py +
 tests/test_prompt_injection_guard.py for the end-to-end proof.
+
+Minimum-necessary-access: the `role` parameter `enforce_masking` takes
+represents the `orchestrator_agent` Unity Catalog group, which is provably
+scoped to SELECT-only on `healthcare_agentic_de.gold` and is deliberately
+never granted membership in `phi_unmasked` — see
+`governance/05_unity_catalog/catalog_and_grants.sql` (the grants themselves)
+and `governance/05_unity_catalog/access_policy_notes.md` (the policy writeup).
+`enforce_masking` below is the in-process backstop for that same guarantee;
+`governance/05_unity_catalog/row_filters_and_masking.sql`'s column masks are
+the database-level one.
 """
 
 import re
 
-from common.contracts import MASKED_COLUMNS
+import structlog
+
+from common.contracts import MASKED_COLUMNS, MAX_NOTES_LENGTH
 
 REDACTED = "***REDACTED***"
+
+logger = structlog.get_logger(__name__)
 
 
 def enforce_masking(table: str, rows: list[dict], role: str) -> list[dict]:
@@ -76,6 +90,17 @@ def scan_for_injection(text: str) -> bool:
     """
     if not text:
         return False
+
+    # Input-size guardrail: cap what's scanned, defense against an extremely
+    # long adversarial payload (e.g. a padded-out `notes` field) designed to
+    # bury an injection attempt or waste scan time. Truncating here means it
+    # happens before any regex/substring work below ever runs on the excess.
+    if len(text) > MAX_NOTES_LENGTH:
+        logger.warning(
+            "truncating_text_before_injection_scan", original_chars=len(text), cap=MAX_NOTES_LENGTH
+        )
+        text = text[:MAX_NOTES_LENGTH]
+
     lowered = text.lower()
 
     if any(phrase in lowered for phrase in _OVERRIDE_PHRASES):

@@ -13,16 +13,41 @@ masked via `governance_guard.enforce_masking` BEFORE it is ever placed into a
 every tool result's content is scanned via `governance_guard.scan_for_injection`
 and wrapped in `<untrusted_data>` tags when flagged. Raw, unmasked rows never
 touch `messages` at any point.
+
+Guardrails added on top of that (see docs/architecture.md's "Guardrails"
+section for the full list with test pointers):
+- Escalation ceiling: `_dispatch_quarantine` tracks consecutive successful
+  quarantine attempts per (table, expectation) in the state file and forces
+  `notify_and_page` once `ESCALATION_CEILING` is reached, in code, not just
+  via prompt instruction.
+- Kill switch: `_autonomous_remediation_enabled` gates `quarantine_bad_records`
+  and `restart_pipeline` on the state file's `autonomous_remediation_enabled`
+  flag (default true); read-only health checks are never gated.
+- Groundedness: a zero-row `query_gold_table` result is short-circuited to a
+  fixed refusal string instead of flowing to the model as ordinary data.
+- Input/output size limits: tool results are capped (`MAX_TOOL_RESULT_ROWS`,
+  `MAX_TOOL_RESULT_CHARS`) before ever reaching `messages`.
+- Immutable audit trail: every `_dispatch` call appends one line to an
+  append-only JSONL log (never rewritten/truncated by normal operation).
+- Graceful degradation: `handle()` never lets a Claude API failure crash the
+  caller.
 """
 
 import json
+import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
+
+import structlog
 
 from agent.llm import Claude, ToolResult
 from agent.prompts import MODE_ROUTER_PROMPT, SYSTEM_PROMPT_DA, SYSTEM_PROMPT_DE
 from agent.state import OrchestratorResult
 from agent.tools import data_query, governance_guard, pipeline_health
+from common.contracts import MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_ROWS
+
+logger = structlog.get_logger(__name__)
 
 DE_TOOLS = [
     {
@@ -86,6 +111,70 @@ DA_TOOLS = [
 
 ORCHESTRATOR_ROLE = "orchestrator_agent"
 
+# Escalation-ceiling guardrail: if a (table, expectation) pair has already
+# been "fixed" this many times and the failure is still present, the next
+# quarantine attempt is refused in code and forced to notify_and_page
+# instead — the model cannot be trusted to self-limit a retry loop.
+ESCALATION_CEILING = 3
+
+# Groundedness guardrail: fixed, deterministic text returned instead of an
+# empty row list, so the model is never handed "no rows" framed as if it were
+# ordinary queryable data it could speculate about.
+GROUNDEDNESS_REFUSAL = "No matching rows found for this query — do not speculate."
+
+DEFAULT_AUDIT_LOG_PATH = "data/state/audit_log.jsonl"
+
+_REMEDIATION_TOOLS = ("quarantine_bad_records", "restart_pipeline")
+
+
+def detect_anomalous_activity(
+    audit_log_path: Path | str,
+    window_minutes: int = 60,
+    escalation_threshold: int = 5,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Pure function: reads the append-only audit log and returns True if the
+    number of `notify_and_page` calls in the trailing `window_minutes` (up to
+    `now`, defaulting to the real current time) exceeds `escalation_threshold`.
+
+    This is a behavioral-anomaly signal, not an action — either a real
+    widespread incident is happening (many independent genuine failures) or
+    the agent itself is misbehaving (e.g. stuck in an escalation loop); either
+    way, exceeding the threshold is worth a human's attention beyond the
+    individual pages already sent.
+
+    `now` is accepted explicitly (rather than always reading the wall clock)
+    so callers — most notably tests — can drive this deterministically
+    against a synthetic audit log with controlled timestamps.
+    """
+    path = Path(audit_log_path)
+    if not path.exists():
+        return False
+
+    reference = now or datetime.now(UTC)
+    cutoff = reference - timedelta(minutes=window_minutes)
+
+    count = 0
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("tool") != "notify_and_page":
+            continue
+        try:
+            ts = datetime.fromisoformat(entry["ts"])
+        except (KeyError, ValueError):
+            continue
+        if ts >= cutoff:
+            count += 1
+
+    return count > escalation_threshold
+
 
 class OrchestratorAgent:
     def __init__(
@@ -94,16 +183,20 @@ class OrchestratorAgent:
         state_path: Path | str = "data/state/pipeline_state.json",
         duckdb_path: Path | str | None = None,
         seed_sql_path: Path | str | None = None,
+        audit_log_path: Path | str | None = None,
     ) -> None:
         self.claude = claude if claude is not None else Claude()
         self.state_path = Path(state_path)
         self.duckdb_path = Path(duckdb_path) if duckdb_path else None
         self.seed_sql_path = Path(seed_sql_path) if seed_sql_path else None
+        self.audit_log_path = Path(audit_log_path or os.environ.get("AUDIT_LOG_PATH", DEFAULT_AUDIT_LOG_PATH))
         self._tool_calls: list[str] = []
         self._remediated = False
+        self._current_mode: str = "unknown"
 
     def handle(self, request: str, mode: Literal["auto", "de", "da"] = "auto") -> OrchestratorResult:
         resolved_mode: Literal["de", "da"] = self._route(request) if mode == "auto" else mode
+        self._current_mode = resolved_mode
         self._tool_calls = []
         self._remediated = False
 
@@ -113,12 +206,33 @@ class OrchestratorAgent:
             system, tools = SYSTEM_PROMPT_DA, DA_TOOLS
 
         messages = [{"role": "user", "content": request}]
-        answer = self.claude.run_tool_loop(
-            system=system,
-            messages=messages,
-            tools=tools,
-            dispatch=self._dispatch,
-        )
+        try:
+            answer = self.claude.run_tool_loop(
+                system=system,
+                messages=messages,
+                tools=tools,
+                dispatch=self._dispatch,
+            )
+        except Exception:
+            # Graceful-degradation guardrail, deliberate: if the Claude API
+            # call path raises (network outage, auth failure, rate limit
+            # exhausted past retries, etc.), we do NOT let that crash the
+            # caller. The pipeline's own DLT hard-stop expectations (e.g.
+            # `known_event_type` in pipeline/03_silver/silver_encounters.py)
+            # keep enforcing data-quality/contract guarantees completely
+            # independently of whether this agent is reachable — the agent is
+            # an automation/convenience layer on top of that guarantee, never
+            # a replacement for it, so its own unavailability must fail safe.
+            logger.error("claude_call_failed_graceful_degradation", mode=resolved_mode)
+            return OrchestratorResult(
+                mode=resolved_mode,
+                answer=(
+                    "Agent unavailable — Delta Live Tables expectations continue enforcing "
+                    "data quality independently of this agent."
+                ),
+                tool_calls=list(self._tool_calls),
+                remediated=False,
+            )
 
         return OrchestratorResult(
             mode=resolved_mode,
@@ -151,12 +265,25 @@ class OrchestratorAgent:
 
         if tool_name == "query_gold_table":
             result = self._dispatch_query_gold_table(tool_input)
+        elif tool_name in _REMEDIATION_TOOLS:
+            # Blast-radius note: these are the ONLY two tools anywhere in
+            # this codebase that mutate pipeline/job state (see
+            # tests/test_tool_allowlist.py) — both are gated by the kill
+            # switch and, for quarantine, the escalation ceiling.
+            result = (
+                self._dispatch_quarantine(tool_input)
+                if tool_name == "quarantine_bad_records"
+                else self._dispatch_restart(tool_input)
+            )
         elif hasattr(pipeline_health, tool_name):
             result = self._dispatch_pipeline_health(tool_name, tool_input)
         else:
             result = ToolResult(tool_use_id="", content=f"Unknown tool: {tool_name}", is_error=True)
 
-        return self._apply_injection_guard(result)
+        result = self._apply_injection_guard(result)
+        result = self._apply_output_size_guard(result)
+        self._append_audit_log(tool_name, tool_input, result)
+        return result
 
     def _dispatch_query_gold_table(self, tool_input: dict) -> ToolResult:
         table = tool_input.get("table", "")
@@ -176,15 +303,138 @@ class OrchestratorAgent:
         # unmasked rows (raw_result.content / `rows` below) must never be
         # returned from this method.
         rows = json.loads(raw_result.content)
+
+        if not rows:
+            # Groundedness guardrail: an empty result set must never flow to
+            # the model dressed up as ordinary data — that invites confident
+            # speculation built on what might just be a typo'd filter. Return
+            # a fixed, deterministic refusal instead.
+            return ToolResult(tool_use_id="", content=GROUNDEDNESS_REFUSAL)
+
         masked_rows = governance_guard.enforce_masking(table, rows, role=ORCHESTRATOR_ROLE)
+
+        if len(masked_rows) > MAX_TOOL_RESULT_ROWS:
+            logger.warning(
+                "truncating_tool_result_rows",
+                table=table,
+                row_count=len(masked_rows),
+                cap=MAX_TOOL_RESULT_ROWS,
+            )
+            masked_rows = masked_rows[:MAX_TOOL_RESULT_ROWS]
+
         return ToolResult(tool_use_id="", content=json.dumps(masked_rows, default=str))
 
     def _dispatch_pipeline_health(self, tool_name: str, tool_input: dict) -> ToolResult:
+        """Handles the read-only health checks and notify_and_page — the
+        tools NOT gated by the kill switch or the escalation ceiling.
+        quarantine_bad_records/restart_pipeline have their own dedicated
+        `_dispatch_quarantine`/`_dispatch_restart` methods below.
+        """
         fn = getattr(pipeline_health, tool_name)
-        result = fn(self.state_path, **tool_input)
-        if tool_name in ("quarantine_bad_records", "restart_pipeline") and not result.is_error:
+        return fn(self.state_path, **tool_input)
+
+    def _dispatch_quarantine(self, tool_input: dict) -> ToolResult:
+        table = tool_input.get("table", "")
+        expectation = tool_input.get("expectation", "")
+
+        if not self._autonomous_remediation_enabled():
+            return self._killswitch_refusal("quarantine_bad_records", tool_input)
+
+        state = pipeline_health.load_state(self.state_path)
+        attempts = state.get("remediation_attempts", {}).get(table, {}).get(expectation, 0)
+        if attempts >= ESCALATION_CEILING:
+            return self._force_escalation(table, expectation, attempts)
+
+        result = pipeline_health.quarantine_bad_records(self.state_path, table, expectation)
+        if not result.is_error:
+            self._remediated = True
+            # Re-read after quarantine_bad_records's own write so we're
+            # incrementing on top of the latest state, not a stale copy.
+            state = pipeline_health.load_state(self.state_path)
+            remediation_attempts = state.setdefault("remediation_attempts", {})
+            remediation_attempts.setdefault(table, {})[expectation] = attempts + 1
+            pipeline_health.save_state(self.state_path, state)
+        return result
+
+    def _dispatch_restart(self, tool_input: dict) -> ToolResult:
+        if not self._autonomous_remediation_enabled():
+            return self._killswitch_refusal("restart_pipeline", tool_input)
+
+        result = pipeline_health.restart_pipeline(self.state_path, **tool_input)
+        if not result.is_error:
             self._remediated = True
         return result
+
+    def _autonomous_remediation_enabled(self) -> bool:
+        """Kill-switch guardrail: reads `autonomous_remediation_enabled` from
+        the state file, defaulting to True if absent (existing state files
+        predating this flag keep working as "enabled").
+        """
+        state = pipeline_health.load_state(self.state_path)
+        return bool(state.get("autonomous_remediation_enabled", True))
+
+    def _killswitch_refusal(self, tool_name: str, tool_input: dict) -> ToolResult:
+        message = (
+            f"Kill switch active (autonomous_remediation_enabled=false): refused "
+            f"{tool_name}({tool_input})."
+        )
+        escalation = pipeline_health.notify_and_page(self.state_path, message)
+        self._tool_calls.append("notify_and_page")
+        logger.warning("kill_switch_refused_tool", tool=tool_name, tool_input=tool_input)
+        payload = {
+            "ok": False,
+            "error": "autonomous_remediation_enabled is false; refusing destructive action",
+            "tool": tool_name,
+            "notify_result": json.loads(escalation.content),
+        }
+        return ToolResult(tool_use_id="", content=json.dumps(payload), is_error=True)
+
+    def _force_escalation(self, table: str, expectation: str, attempts: int) -> ToolResult:
+        message = (
+            f"Escalation ceiling reached: {table}/{expectation} still failing after "
+            f"{attempts} automated quarantine attempts. Escalating instead of retrying."
+        )
+        escalation = pipeline_health.notify_and_page(self.state_path, message)
+        self._tool_calls.append("notify_and_page")
+        logger.warning("escalation_ceiling_reached", table=table, expectation=expectation, attempts=attempts)
+        payload = {
+            "ok": False,
+            "escalated": True,
+            "reason": "escalation_ceiling_reached",
+            "table": table,
+            "expectation": expectation,
+            "notify_result": json.loads(escalation.content),
+        }
+        return ToolResult(tool_use_id="", content=json.dumps(payload), is_error=True)
+
+    def _apply_output_size_guard(self, result: ToolResult) -> ToolResult:
+        if len(result.content) <= MAX_TOOL_RESULT_CHARS:
+            return result
+        logger.warning(
+            "truncating_tool_result_content", original_chars=len(result.content), cap=MAX_TOOL_RESULT_CHARS
+        )
+        truncated = result.content[:MAX_TOOL_RESULT_CHARS] + "...<truncated>"
+        return ToolResult(tool_use_id=result.tool_use_id, content=truncated, is_error=result.is_error)
+
+    def _append_audit_log(self, tool_name: str, tool_input: dict, result: ToolResult) -> None:
+        """Immutable audit trail: one append-only JSONL line per dispatch()
+        call, containing the ALREADY-MASKED tool output — never a raw
+        pre-mask value, since `result` here is what's already survived
+        `_dispatch`'s masking/injection-guard/size-guard pipeline. Opens with
+        mode "a" specifically so normal operation can only ever grow this
+        file, never rewrite or truncate it.
+        """
+        entry = {
+            "ts": datetime.now(UTC).isoformat(),
+            "mode": self._current_mode,
+            "tool": tool_name,
+            "input": tool_input,
+            "output": result.content,
+            "is_error": result.is_error,
+        }
+        self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.audit_log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, default=str) + "\n")
 
     @staticmethod
     def _apply_injection_guard(result: ToolResult) -> ToolResult:

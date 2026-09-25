@@ -10,20 +10,29 @@ include:
 
 variables:
   kafka_bootstrap_servers:
-    description: Bootstrap servers for the patient_events Kafka/Redpanda cluster.
+    description: >-
+      Bootstrap servers for the patient_events Kafka/Redpanda cluster (local
+      dev via docker-compose.yml). On GCP, Pub/Sub is the cloud-native managed
+      alternative to self-hosting Kafka/Redpanda for this same continuous
+      ADT+vitals ingestion path (consumed via the Spark Structured Streaming
+      Pub/Sub connector) — not swapped in here since it would change
+      pipeline/01_ingest/kafka_patient_events.py's read format; Kafka is kept
+      so local dev (docker-compose) and this bundle target the same code path.
     default: localhost:19092
   provider_landing_path:
-    description: Landing volume path Autoloader watches for provider roster batch files.
-    default: /Volumes/healthcare_agentic_de/landing/providers
+    description: GCS landing path Autoloader watches for provider roster batch files.
+    default: gs://healthcare-agentic-de-landing/providers
 
 targets:
   dev:
     mode: development
     default: true
     workspace:
-      host: https://REPLACE-WITH-YOUR-WORKSPACE.cloud.databricks.com
+      # GCP-hosted Databricks workspace. Placeholder — replace with your own
+      # workspace URL before running `databricks bundle validate/deploy`.
+      host: https://REPLACE-WITH-YOUR-WORKSPACE.gcp.databricks.com
 
   prod:
     mode: production
     workspace:
-      host: https://REPLACE-WITH-YOUR-WORKSPACE.cloud.databricks.com
+      host: https://REPLACE-WITH-YOUR-WORKSPACE.gcp.databricks.com

@@ -66,7 +66,8 @@ def test_auto_fixable_failure_is_remediated_without_paging(tmp_path, monkeypatch
     claude = ScriptedSequenceClaude(
         steps, final_answer="Cleared the plausible_vital_value failure and restarted the pipeline."
     )
-    orchestrator = OrchestratorAgent(claude=claude, state_path=state_path)
+    audit_log_path = tmp_path / "audit_log.jsonl"
+    orchestrator = OrchestratorAgent(claude=claude, state_path=state_path, audit_log_path=audit_log_path)
 
     result = orchestrator.handle("Check pipeline health and fix anything auto-fixable.", mode="de")
 
@@ -93,7 +94,8 @@ def test_hard_stop_failure_is_escalated_not_auto_fixed(tmp_path, monkeypatch):
         ),
     ]
     claude = ScriptedSequenceClaude(steps, final_answer="Escalated the hard-stop contract break to on-call.")
-    orchestrator = OrchestratorAgent(claude=claude, state_path=state_path)
+    audit_log_path = tmp_path / "audit_log.jsonl"
+    orchestrator = OrchestratorAgent(claude=claude, state_path=state_path, audit_log_path=audit_log_path)
 
     result = orchestrator.handle("Check pipeline health.", mode="de")
 

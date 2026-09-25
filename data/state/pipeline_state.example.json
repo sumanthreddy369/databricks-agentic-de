@@ -25,5 +25,7 @@
       "schema_version"
     ]
   },
-  "incidents": []
+  "incidents": [],
+  "autonomous_remediation_enabled": true,
+  "remediation_attempts": {}
 }

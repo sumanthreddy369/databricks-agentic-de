@@ -49,7 +49,9 @@ def test_dispatch_wraps_injected_tool_content_before_it_can_reach_messages(monke
     state_path = tmp_path / "pipeline_state.json"
     state_path.write_text(json.dumps({"tables": {}, "jobs": {}, "schema_snapshot": {}, "incidents": []}))
 
-    orchestrator = OrchestratorAgent(claude=_NoopClaude(), state_path=state_path)
+    orchestrator = OrchestratorAgent(
+        claude=_NoopClaude(), state_path=state_path, audit_log_path=tmp_path / "audit_log.jsonl"
+    )
     result = orchestrator._dispatch("check_expectation_metrics", {})
 
     assert result.content.startswith("<untrusted_data>")

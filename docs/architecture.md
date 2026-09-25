@@ -94,6 +94,31 @@ Silver: `dlt.apply_changes` (CDC/upsert) for mutable state (`dim_patients`,
 (`pipeline/03_silver/silver_vitals.py` — see its docstring for the full
 rationale).
 
+## Guardrails
+
+Production AI-agent guardrail patterns, each enforced in code (not just
+requested via a system prompt) unless noted otherwise. "Implementing
+file" is where the guardrail runs; "Test" is what proves it.
+
+| Guardrail | What it does | Implementing file | Test |
+|---|---|---|---|
+| Input validation | `common.contracts.PatientEvent`/`VitalReading` (Pydantic) reject malformed envelopes (bad `event_type`/`itemid`, wrong types, unknown fields) at construction; out-of-range vitals are flagged, not rejected — mirrors DLT `expect` vs `expect_or_drop` | `common/contracts.py` | `tests/test_contracts_pydantic.py` |
+| Input-size limit | `MAX_NOTES_LENGTH` caps text scanned by the injection guard, defending against a padded-out adversarial payload | `agent/tools/governance_guard.py:scan_for_injection` | `tests/test_prompt_injection_guard.py` |
+| Output-size / groundedness | A zero-row `query_gold_table` result is short-circuited to a fixed refusal instead of flowing to the model as ordinary data; oversized results are capped (`MAX_TOOL_RESULT_ROWS`, `MAX_TOOL_RESULT_CHARS`) before ever reaching `messages` | `agent/orchestrator.py:_dispatch_query_gold_table`, `_apply_output_size_guard` | `tests/test_groundedness_refusal.py` |
+| Tool allowlisting / blast radius | Only 6 DE tools and 1 DA tool are ever passed to Claude; no destructive (drop/delete/truncate-shaped) tool exists anywhere in the codebase | `agent/orchestrator.py:DE_TOOLS`/`DA_TOOLS` | `tests/test_tool_allowlist.py` |
+| Escalation ceiling | A (table, expectation) pair that's already been "fixed" 3 times and is still failing is refused a 4th quarantine attempt and forced to `notify_and_page` — enforced in the dispatch wrapper, since the model can't be trusted to self-limit a retry loop | `agent/orchestrator.py:_dispatch_quarantine`, `ESCALATION_CEILING` | `tests/test_escalation_ceiling.py` |
+| Kill switch | `autonomous_remediation_enabled` (state-file flag, default true) gates `quarantine_bad_records`/`restart_pipeline`; read-only health checks and `notify_and_page` are never gated | `agent/orchestrator.py:_autonomous_remediation_enabled`, `_killswitch_refusal` | `tests/test_kill_switch.py` |
+| Immutable audit trail | Every `_dispatch()` call appends one line to an append-only JSONL log (masked output only, never raw pre-mask values); opened with `"a"`, never rewritten | `agent/orchestrator.py:_append_audit_log` | `tests/test_audit_trail.py` |
+| Behavioral anomaly detection | Pure function counts `notify_and_page` calls in a trailing time window against a threshold — signals either a real widespread incident or the agent itself misbehaving | `agent/orchestrator.py:detect_anomalous_activity` | `tests/test_anomaly_detection.py` |
+| Retry + timeout | The Anthropic call and the Kafka `produce()` call are each wrapped in exponential-backoff retry (tenacity), retrying only transient/network-shaped errors; the Anthropic call also carries an explicit timeout | `agent/llm.py:Claude._create_message`, `simulator/producer.py:_produce_with_retry` | `tests/test_llm_retry.py` |
+| Rate limiting | `--max-events-per-second` throttles the simulator's aggregate publish rate — a per-source rate limit distinct from the existing per-vital cadence jitter | `simulator/producer.py:RateLimiter` | (exercised via `RateLimiter.acquire`; no live-broker integration test — see Status in README.md) |
+| Graceful degradation | If the Claude call path raises, `handle()` catches it and returns a safe, clearly-worded result instead of crashing — the pipeline's own DLT hard-stop expectations keep enforcing correctness independently of whether the agent is reachable | `agent/orchestrator.py:handle` | `tests/test_llm_retry.py` (retry path); degradation path covered by `handle`'s own `except` block |
+| Minimum-necessary-access | `orchestrator_agent` is granted exactly `USE CATALOG` + `USE SCHEMA, SELECT` on `gold` — no write access, no Bronze/Silver, never `phi_unmasked` | `governance/05_unity_catalog/catalog_and_grants.sql`, `governance/05_unity_catalog/access_policy_notes.md` | `tests/test_contract_consistency.py` (masking cross-check); grant itself is Databricks-only SQL, not independently testable here |
+| Observability tracing | Optional Langfuse spans per turn/tool call (turn number, tool name, latency, token usage) — a genuine no-op with zero network calls unless `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are set | `agent/llm.py:Tracer` | `tests/test_llm_retry.py` exercises the no-op default; real Langfuse spans are not exercised against a live account in this environment |
+
+PHI masking and prompt-injection defense (the two guardrails this project led
+with) are documented above in their own sections, not repeated in this table.
+
 ## Why Kafka + Autoloader-as-secondary
 
 The patient-events stream (ADT + vitals) is genuinely continuous,

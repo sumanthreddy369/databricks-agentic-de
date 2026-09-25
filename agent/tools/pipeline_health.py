@@ -11,8 +11,15 @@ State file shape (see data/state/pipeline_state.example.json):
   "tables": {"<table>": {"expectations": {"<name>": {"failure_count": int}}}},
   "jobs": {"<job_or_pipeline_name>": {"status": "RUNNING"|"SUCCESS"|"FAILED"}},
   "schema_snapshot": {"patient_events": ["event_id", ...]},
-  "incidents": [{"message": str, "ts": str}, ...]
+  "incidents": [{"message": str, "ts": str}, ...],
+  "autonomous_remediation_enabled": bool,   # kill switch, default true if absent
+  "remediation_attempts": {"<table>": {"<expectation>": int}}  # escalation-ceiling counters
 }
+
+The last two keys are read/written by agent/orchestrator.py's guardrail
+wiring (`_autonomous_remediation_enabled`, `_dispatch_quarantine`), not by
+any function in this file — they're documented here because they live in the
+same state file this module owns.
 """
 
 import json
@@ -28,6 +35,14 @@ def _load(state_path: Path) -> dict:
 
 def _save(state_path: Path, state: dict) -> None:
     Path(state_path).write_text(json.dumps(state, indent=2))
+
+
+# Public aliases: agent/orchestrator.py reads/writes this same state file for
+# its own guardrail bookkeeping (kill switch, escalation-ceiling counters)
+# and should go through named functions rather than reaching into this
+# module's leading-underscore internals.
+load_state = _load
+save_state = _save
 
 
 def check_expectation_metrics(state_path: Path) -> ToolResult:

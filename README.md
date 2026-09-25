@@ -32,6 +32,27 @@ otherwise split across people:
 | 7. Orchestrate | Two DLT pipelines, one hourly reference-data job | Databricks Asset Bundle | [`databricks.yml`](databricks.yml), [`resources/`](resources/) |
 | 8. Validate | Mocked-LLM pytest suite proving masking/injection-defense/remediation | pytest | [`tests/`](tests/) |
 
+## Guardrails
+
+Beyond PHI masking and prompt-injection defense (above), the orchestrator
+carries a fuller set of production AI-agent guardrail patterns — each
+enforced in code, not just requested in a system prompt. Full table with
+implementing-file/test pointers: [`docs/architecture.md`](docs/architecture.md#guardrails).
+
+| Guardrail | Summary |
+|---|---|
+| Input validation | Pydantic models (`common/contracts.py`) reject malformed event envelopes at construction |
+| Groundedness | A zero-row Gold-table query returns a fixed refusal, never silent-flows to the model as data |
+| Tool allowlisting / blast radius | No destructive tool exists anywhere; DE/DA tool lists are structurally verified |
+| Escalation ceiling | A failure "fixed" 3 times and still failing forces `notify_and_page`, in code |
+| Kill switch | A state-file flag can disable auto-remediation while read-only checks keep working |
+| Immutable audit trail | Every dispatch appends one line to an append-only JSONL log (masked output only) |
+| Anomaly detection | A pure function flags a suspicious spike in escalations within a time window |
+| Retry / timeout | Anthropic + Kafka calls retry transient failures only, with exponential backoff |
+| Rate limiting | `--max-events-per-second` throttles the simulator's aggregate publish rate |
+| Graceful degradation | A Claude API outage returns a safe result instead of crashing the caller |
+| Minimum-necessary-access | The agent's Unity Catalog role is SELECT-only on Gold, never PHI-unmasked |
+
 ## Layout
 
 ```
@@ -39,10 +60,10 @@ databricks-agentic-de/
 ├── pipeline/                # Databricks-only: DLT bronze/silver/gold, structurally complete, not run here
 │   ├── common/schemas.py
 │   ├── 01_ingest/  02_bronze/  03_silver/  04_gold/
-├── governance/05_unity_catalog/   # Unity Catalog grants, column masks, row filters (Databricks-only)
-├── common/contracts.py       # single source of truth: event schema, allowed types, masked columns
+├── governance/05_unity_catalog/   # Unity Catalog grants, column masks, row filters, access policy notes (Databricks-only)
+├── common/contracts.py       # single source of truth: event schema, allowed types, masked columns, Pydantic models
 ├── agent/                    # the real, locally-runnable deliverable
-│   ├── llm.py                # thin Claude tool-loop wrapper, no agent framework
+│   ├── llm.py                # thin Claude tool-loop wrapper, no agent framework; retry/timeout/optional Langfuse tracing
 │   ├── orchestrator.py       # OrchestratorAgent: DE/DA routing + guardrail wiring
 │   ├── prompts.py  state.py
 │   └── tools/{pipeline_health.py, data_query.py, governance_guard.py}
@@ -52,7 +73,7 @@ databricks-agentic-de/
 │   ├── reference/synthea_sample/   # reference artifact only — not read at runtime
 │   ├── seed/gold_seed.sql
 │   └── state/pipeline_state.example.json
-├── tests/                    # 9 files, mocked Anthropic client, zero network calls
+├── tests/                    # mocked Anthropic client, zero network calls
 └── docs/architecture.md
 ```
 
@@ -140,13 +161,22 @@ databricks bundle deploy -t dev
   `Population.tick()` loop, driven by an injectable clock (no real sleep in
   the core loop) for deterministic tests.
 - `agent/` — the full orchestrator (`OrchestratorAgent`), both DE and DA
-  tool sets, and the masking/injection-defense guardrail wiring. The
-  Anthropic client is fully mockable (`Claude` is injected, never
-  constructed globally) — the pytest suite makes **zero real network/LLM
-  calls** and passes with no `ANTHROPIC_API_KEY` set.
+  tool sets, and the masking/injection-defense guardrail wiring, plus the
+  fuller guardrail set in [`docs/architecture.md`](docs/architecture.md#guardrails)
+  (escalation ceiling, kill switch, audit trail, anomaly detection, retry/
+  timeout, graceful degradation). The Anthropic client is fully mockable
+  (`Claude` is injected, never constructed globally) — the pytest suite makes
+  **zero real network/LLM calls** and passes with no `ANTHROPIC_API_KEY` set.
 - `data/seed/gold_seed.sql` + DuckDB — a real, queryable local stand-in for
   the Gold schema that `agent/tools/data_query.py` runs against.
-- `pytest` (9 test files) and `ruff check .` both pass locally.
+- `pytest` and `ruff check .` both pass locally.
+- Tech stack additions backing the guardrails above: **Pydantic** (event
+  envelope validation, `common/contracts.py`), **Tenacity** (retry/backoff,
+  `agent/llm.py` + `simulator/producer.py`), **structlog** (structured
+  warning/error logs on guardrail trips), and optional **Langfuse** tracing
+  (`agent/llm.py:Tracer` — a genuine no-op with zero network calls unless
+  `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are set; not exercised against a
+  real Langfuse account in this environment).
 
 **Databricks-only / structurally complete but not executable here (no live
 workspace exists in this environment):**
@@ -155,9 +185,13 @@ workspace exists in this environment):**
   and SQL, but only resolves once the `databricks` extra and a real cluster
   exist.
 - `resources/*.yml` and `databricks.yml` — a structurally valid Databricks
-  Asset Bundle with placeholder workspace hosts; `databricks bundle validate`
-  is gated in CI on `DATABRICKS_HOST`/`DATABRICKS_TOKEN` secrets and skips
-  gracefully without them.
+  Asset Bundle targeting **GCP** (workspace host is a `*.gcp.databricks.com`
+  placeholder, `provider_landing_path` defaults to a `gs://` bucket path);
+  `databricks bundle validate` is gated in CI on
+  `DATABRICKS_HOST`/`DATABRICKS_TOKEN` secrets and skips gracefully without
+  them. GCP Pub/Sub is noted inline (`databricks.yml`) as the cloud-native
+  managed alternative to the self-hosted Kafka/Redpanda path used for local
+  dev in this repo.
 - `resources/workflows.yml:agent_pipeline_healthcheck` — runs the DE-mode
   orchestrator on a schedule against a real cluster; described for
   completeness, not run here.

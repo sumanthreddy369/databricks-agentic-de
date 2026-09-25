@@ -19,6 +19,7 @@ uv.lock.bak
 
 # Local runtime state / data
 data/state/pipeline_state.json
+data/state/audit_log.jsonl
 data/seed/gold.duckdb
 data/landing/
 

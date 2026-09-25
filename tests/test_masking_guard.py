@@ -90,6 +90,7 @@ def test_query_gold_table_never_leaks_raw_phi_into_messages(tmp_path):
         claude=ScriptedQueryClaude(),
         duckdb_path=duckdb_path,
         seed_sql_path="data/seed/gold_seed.sql",
+        audit_log_path=tmp_path / "audit_log.jsonl",
     )
 
     # Build the same `messages` transcript handle() would build internally,
