@@ -52,6 +52,8 @@ implementing-file/test pointers: [`docs/architecture.md`](docs/architecture.md#g
 | Rate limiting | `--max-events-per-second` throttles the simulator's aggregate publish rate |
 | Graceful degradation | A Claude API outage returns a safe result instead of crashing the caller |
 | Minimum-necessary-access | The agent's Unity Catalog role is SELECT-only on Gold, never PHI-unmasked |
+| Observability tracing | Optional Langfuse (LLM calls) + OpenTelemetry (infra) spans — no-op unless configured |
+| Secret management | GCP Secret Manager when `GCP_PROJECT_ID` is set, else a plain env var — no-op unless configured |
 
 ## Layout
 
@@ -60,19 +62,29 @@ databricks-agentic-de/
 ├── pipeline/                # Databricks-only: DLT bronze/silver/gold, structurally complete, not run here
 │   ├── common/schemas.py
 │   ├── 01_ingest/  02_bronze/  03_silver/  04_gold/
-├── governance/05_unity_catalog/   # Unity Catalog grants, column masks, row filters, access policy notes (Databricks-only)
+├── governance/05_unity_catalog/   # UC grants, column masks, row filters, BigQuery federation example (Databricks-only)
 ├── common/contracts.py       # single source of truth: event schema, allowed types, masked columns, Pydantic models
 ├── agent/                    # the real, locally-runnable deliverable
 │   ├── llm.py                # thin Claude tool-loop wrapper, no agent framework; retry/timeout/optional Langfuse tracing
-│   ├── orchestrator.py       # OrchestratorAgent: DE/DA routing + guardrail wiring
+│   ├── orchestrator.py       # OrchestratorAgent: DE/DA routing + guardrail wiring, MCP-routed DE-mode dispatch
+│   ├── mcp_bridge.py         # MCP client: talks to mcp_server/server.py over stdio
+│   ├── otel.py                # OpenTelemetry tracing setup, no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set
+│   ├── secrets.py             # GCP Secret Manager, no-op unless GCP_PROJECT_ID is set
 │   ├── prompts.py  state.py
-│   └── tools/{pipeline_health.py, data_query.py, governance_guard.py}
+│   └── tools/{pipeline_health.py, data_query.py, governance_guard.py, anomaly_score.py, knowledge_search.py}
+├── mcp_server/server.py      # real MCP server exposing the tools above over stdio
+├── ml/                       # train_anomaly_model.py (MLflow + IsolationForest) + models/vitals_anomaly.onnx
 ├── simulator/                # streaming patient-event + provider-roster generators
-│   ├── domain.py  population.py  producer.py  autoloader_feed.py  chaos.py
+│   ├── domain.py  population.py  producer.py (OTel-instrumented)  autoloader_feed.py  chaos.py
+├── infra/
+│   ├── terraform/            # GCP resources Asset Bundles don't cover — not applied here, see its README.md
+│   └── cloudrun/              # Dockerfile + deploy.sh for running the simulator on Cloud Run — not run here
 ├── data/
 │   ├── reference/synthea_sample/   # reference artifact only — not read at runtime
+│   ├── knowledge/clinical_protocols.md   # demo content for agent/tools/knowledge_search.py
 │   ├── seed/gold_seed.sql
 │   └── state/pipeline_state.example.json
+├── docs/comparisons/          # Genie/Agent Bricks/Vertex AI evaluation plans — pending a live workspace
 ├── tests/                    # mocked Anthropic client, zero network calls
 └── docs/architecture.md
 ```
@@ -177,13 +189,89 @@ databricks bundle deploy -t dev
   (`agent/llm.py:Tracer` — a genuine no-op with zero network calls unless
   `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are set; not exercised against a
   real Langfuse account in this environment).
+- ML lifecycle: **MLflow** (local file-based tracking + Model Registry,
+  `ml/train_anomaly_model.py`), **scikit-learn** (`IsolationForest`),
+  **skl2onnx** + **onnxruntime** (export/serve the trained model as ONNX,
+  `agent/tools/anomaly_score.py`) — see
+  [`docs/architecture.md`](docs/architecture.md#ml-lifecycle-mlflow--onnx-anomaly-detection).
+- Agent protocol: the official **`mcp`** SDK — DE-mode tools are served over
+  a real MCP server (`mcp_server/server.py`) and called through an MCP client
+  bridge (`agent/mcp_bridge.py`), not just in-process function calls — see
+  [`docs/architecture.md`](docs/architecture.md#mcp-tool-architecture).
+- Infrastructure: **OpenTelemetry** (`opentelemetry-api`/`-sdk`; spans for
+  the simulator's publish loop and DE-mode tool calls, no-op unless
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is set) and **`google-cloud-secret-manager`**
+  (`agent/secrets.py`, same no-op-unless-`GCP_PROJECT_ID`-is-set pattern as
+  Langfuse).
+
+## Platform-native alternatives considered
+
+This project's differentiator is a hand-built orchestrator agent instead of a
+vendor no-code tool (see the intro above) — but that's a trade-off worth
+actually evaluating against the platform-native alternatives, not just
+asserting. Three evaluation plans (criteria + methodology, explicitly **not**
+completed comparisons — no scores or "X beat Y" conclusions exist yet) live
+in [`docs/comparisons/`](docs/comparisons/):
+
+- [`genie_vs_custom_agent.md`](docs/comparisons/genie_vs_custom_agent.md) —
+  Databricks Genie vs. this project's DA-mode Q&A path.
+- [`agent_bricks_vs_custom_agent.md`](docs/comparisons/agent_bricks_vs_custom_agent.md) —
+  Databricks Agent Bricks vs. this project's hand-built orchestrator +
+  MCP tool layer.
+- [`vertex_ai_vs_mlflow.md`](docs/comparisons/vertex_ai_vs_mlflow.md) —
+  Vertex AI Model Registry/Endpoints vs. this project's local MLflow + ONNX
+  ML lifecycle.
+
+Each is pending a real, GCP-connected Databricks workspace that was still
+being set up as of this task and was not yet live in this environment — see
+each document's own `## Status: Pending` section.
+
+## Status
+
+Three categories, precisely: what actually runs and is tested locally right
+now; what is Databricks/GCP-platform code that structurally only ever
+resolves on that platform (independent of any particular workspace); and
+what is new scaffolding that specifically awaits this project's real,
+GCP-connected Databricks workspace (in progress, not yet live here) before it
+can be exercised for real.
+
+**Locally runnable and tested:**
+- `simulator/` — patient-event and provider-roster generators, and the
+  `Population.tick()` loop, driven by an injectable clock (no real sleep in
+  the core loop) for deterministic tests. `simulator/producer.py:send` is
+  also OpenTelemetry-instrumented (one span per event published).
+- `agent/` — the full orchestrator (`OrchestratorAgent`), both DE and DA
+  tool sets, and the masking/injection-defense guardrail wiring, plus the
+  fuller guardrail set in [`docs/architecture.md`](docs/architecture.md#guardrails)
+  (escalation ceiling, kill switch, audit trail, anomaly detection, retry/
+  timeout, graceful degradation, OpenTelemetry tracing, GCP Secret Manager
+  integration). The Anthropic client is fully mockable (`Claude` is injected,
+  never constructed globally) — the pytest suite makes **zero real
+  network/LLM calls** and passes with no `ANTHROPIC_API_KEY` set.
+- `agent/mcp_bridge.py` + `mcp_server/server.py` — a real MCP server exposing
+  the pipeline-health, data-query, and anomaly-scoring tools, and a real MCP
+  client bridge DE-mode dispatch is routed through; `tests/test_mcp_server_tools.py`
+  spins up the real subprocess over stdio (a local pipe, not a network call)
+  and re-proves the masking and audit-trail guarantees hold with MCP-routed
+  dispatch.
+- `ml/train_anomaly_model.py` + `agent/tools/anomaly_score.py` — a real,
+  trained `IsolationForest` anomaly detector, tracked via a local file-based
+  MLflow run and registry, exported to the committed
+  `ml/models/vitals_anomaly.onnx` and served locally via `onnxruntime`. Tests
+  train a tiny model into a `tmp_path` rather than depending on the full
+  training run's speed.
+- `data/seed/gold_seed.sql` + DuckDB — a real, queryable local stand-in for
+  the Gold schema that `agent/tools/data_query.py` runs against.
+- `pytest` and `ruff check .` both pass locally.
 
 **Databricks-only / structurally complete but not executable here (no live
-workspace exists in this environment):**
+workspace exists in this environment) — a platform requirement, independent
+of workspace setup progress:**
 - Everything under `pipeline/` (DLT bronze/silver/gold) and
-  `governance/05_unity_catalog/` (Unity Catalog SQL) — correct PySpark/DLT
-  and SQL, but only resolves once the `databricks` extra and a real cluster
-  exist.
+  `governance/05_unity_catalog/` (Unity Catalog SQL, plus the new
+  `bigquery_federation_example.sql` Lakehouse Federation scaffold) — correct
+  PySpark/DLT and SQL, but only resolves once the `databricks` extra and a
+  real cluster exist.
 - `resources/*.yml` and `databricks.yml` — a structurally valid Databricks
   Asset Bundle targeting **GCP** (workspace host is a `*.gcp.databricks.com`
   placeholder, `provider_landing_path` defaults to a `gs://` bucket path);
@@ -191,7 +279,8 @@ workspace exists in this environment):**
   `DATABRICKS_HOST`/`DATABRICKS_TOKEN` secrets and skips gracefully without
   them. GCP Pub/Sub is noted inline (`databricks.yml`) as the cloud-native
   managed alternative to the self-hosted Kafka/Redpanda path used for local
-  dev in this repo.
+  dev in this repo (and provisioned structurally in `infra/terraform/main.tf`
+  below).
 - `resources/workflows.yml:agent_pipeline_healthcheck` — runs the DE-mode
   orchestrator on a schedule against a real cluster; described for
   completeness, not run here.
@@ -199,6 +288,28 @@ workspace exists in this environment):**
   particular sandbox, but is the same, standard local-Kafka pattern used
   elsewhere and is expected to work with `docker compose up -d`.
 
+**Pending a live, GCP-connected Databricks workspace (in progress, not yet
+live in this environment) — new in this pass, scaffolded and unit-tested
+where the scaffold has a graceful-degradation path, but genuinely not
+exercised against real infrastructure:**
+- `agent/tools/knowledge_search.py` + `data/knowledge/clinical_protocols.md`
+  — Databricks Vector Search integration; degrades to a clear "not
+  configured" result with zero network calls when unconfigured
+  (`tests/test_knowledge_search_tool.py` proves the degradation path, not a
+  real vector search).
+- `infra/terraform/` — GCS bucket, service account/IAM, Pub/Sub topic, and
+  Secret Manager containers for the GCP resources Asset Bundles don't cover;
+  never `terraform init`/`plan`/`apply`'d here (see its own README.md).
+- `governance/05_unity_catalog/bigquery_federation_example.sql` —
+  illustrative Lakehouse Federation SQL, not run against a real BigQuery
+  dataset.
+- `infra/cloudrun/` — a Dockerfile + `gcloud run deploy` script for running
+  the simulator on Cloud Run; never built or deployed here.
+- The three [`docs/comparisons/`](docs/comparisons/) evaluation plans —
+  criteria and methodology only, explicitly marked `## Status: Pending`, no
+  fabricated results.
+
 Swap in a real Databricks workspace, real Synthea/MIMIC-IV exports (see the
 dataset-sourcing section above), and real credentials before treating any of
-the Databricks-only pieces as more than structurally correct.
+the Databricks-only or pending-workspace pieces as more than structurally
+correct.

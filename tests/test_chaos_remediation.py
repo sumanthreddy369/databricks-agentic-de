@@ -11,7 +11,6 @@ import json
 from pathlib import Path
 
 from agent.orchestrator import OrchestratorAgent
-from agent.tools import pipeline_health
 from simulator.chaos import simulate_pipeline_failure
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -40,22 +39,9 @@ def _fresh_state_path(tmp_path) -> Path:
     return state_path
 
 
-def _spy_on_notify_and_page(monkeypatch):
-    calls = {"count": 0}
-    original = pipeline_health.notify_and_page
-
-    def spy(state_path_arg, message):
-        calls["count"] += 1
-        return original(state_path_arg, message)
-
-    monkeypatch.setattr(pipeline_health, "notify_and_page", spy)
-    return calls
-
-
-def test_auto_fixable_failure_is_remediated_without_paging(tmp_path, monkeypatch):
+def test_auto_fixable_failure_is_remediated_without_paging(tmp_path):
     state_path = _fresh_state_path(tmp_path)
     simulate_pipeline_failure(state_path, "silver_vitals", "plausible_vital_value", failure_count=5)
-    calls = _spy_on_notify_and_page(monkeypatch)
 
     steps = [
         ("check_expectation_metrics", {}),
@@ -73,7 +59,12 @@ def test_auto_fixable_failure_is_remediated_without_paging(tmp_path, monkeypatch
 
     final_state = json.loads(state_path.read_text())
     assert final_state["tables"]["silver_vitals"]["expectations"]["plausible_vital_value"]["failure_count"] == 0
-    assert calls["count"] == 0
+    # notify_and_page's real effect (an appended incident) is checked directly
+    # against the shared state file rather than via a monkeypatch spy on
+    # agent.tools.pipeline_health.notify_and_page — that function now runs
+    # inside the MCP server subprocess (see agent/mcp_bridge.py), a separate
+    # process a monkeypatch in this test process cannot reach.
+    assert final_state["incidents"] == []
     assert result.remediated is True
     assert result.mode == "de"
     assert "quarantine_bad_records" in result.tool_calls
@@ -81,10 +72,9 @@ def test_auto_fixable_failure_is_remediated_without_paging(tmp_path, monkeypatch
     assert "notify_and_page" not in result.tool_calls
 
 
-def test_hard_stop_failure_is_escalated_not_auto_fixed(tmp_path, monkeypatch):
+def test_hard_stop_failure_is_escalated_not_auto_fixed(tmp_path):
     state_path = _fresh_state_path(tmp_path)
     simulate_pipeline_failure(state_path, "silver_encounters", "known_event_type", failure_count=1)
-    calls = _spy_on_notify_and_page(monkeypatch)
 
     steps = [
         ("check_expectation_metrics", {}),
@@ -99,8 +89,13 @@ def test_hard_stop_failure_is_escalated_not_auto_fixed(tmp_path, monkeypatch):
 
     result = orchestrator.handle("Check pipeline health.", mode="de")
 
-    assert calls["count"] == 1
     final_state = json.loads(state_path.read_text())
+    # notify_and_page's real effect (an appended incident) is checked
+    # directly against the shared state file — see the comment in
+    # test_auto_fixable_failure_is_remediated_without_paging above for why a
+    # monkeypatch spy no longer works here.
+    assert len(final_state["incidents"]) == 1
+    assert "known_event_type" in final_state["incidents"][0]["message"]
     # Left untouched — no quarantine/restart was attempted on a hard-stop failure.
     assert final_state["tables"]["silver_encounters"]["expectations"]["known_event_type"]["failure_count"] == 1
     assert "notify_and_page" in result.tool_calls

@@ -9,7 +9,6 @@ import json
 
 from agent.llm import ToolResult
 from agent.orchestrator import OrchestratorAgent
-from agent.tools import pipeline_health
 from agent.tools.governance_guard import scan_for_injection
 from simulator.chaos import build_prompt_injection_payload
 
@@ -35,22 +34,32 @@ def test_scan_for_injection_allows_empty_text():
 # --- (b) end-to-end via OrchestratorAgent._dispatch ----------------------
 
 
-def test_dispatch_wraps_injected_tool_content_before_it_can_reach_messages(monkeypatch, tmp_path):
+def test_dispatch_wraps_injected_tool_content_before_it_can_reach_messages(tmp_path):
     injected_notes = build_prompt_injection_payload()["notes"]
 
-    def fake_check(state_path):
-        # Simulates a tool result whose content happens to carry an
-        # untrusted note (e.g. bundled diagnostic context) containing an
-        # injection attempt.
-        return ToolResult(tool_use_id="", content=json.dumps({"ok": True, "note": injected_notes}))
+    class _FakeBridge:
+        """Stands in for agent.mcp_bridge.MCPToolBridge — since DE-mode tool
+        calls are now dispatched through that bridge (see
+        agent/orchestrator.py's module docstring and
+        tests/test_mcp_server_tools.py for the real, non-faked MCP round
+        trip), this fakes the bridge boundary the same way _NoopClaude fakes
+        the Claude boundary, to simulate a tool result whose content happens
+        to carry an untrusted note (e.g. bundled diagnostic context)
+        containing an injection attempt.
+        """
 
-    monkeypatch.setattr(pipeline_health, "check_expectation_metrics", fake_check)
+        def dispatch(self, tool_name, tool_input):
+            assert tool_name == "check_expectation_metrics"
+            return ToolResult(tool_use_id="", content=json.dumps({"ok": True, "note": injected_notes}))
 
     state_path = tmp_path / "pipeline_state.json"
     state_path.write_text(json.dumps({"tables": {}, "jobs": {}, "schema_snapshot": {}, "incidents": []}))
 
     orchestrator = OrchestratorAgent(
-        claude=_NoopClaude(), state_path=state_path, audit_log_path=tmp_path / "audit_log.jsonl"
+        claude=_NoopClaude(),
+        state_path=state_path,
+        audit_log_path=tmp_path / "audit_log.jsonl",
+        mcp_bridge=_FakeBridge(),
     )
     result = orchestrator._dispatch("check_expectation_metrics", {})
 

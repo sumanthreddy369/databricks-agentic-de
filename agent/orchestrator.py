@@ -14,6 +14,22 @@ every tool result's content is scanned via `governance_guard.scan_for_injection`
 and wrapped in `<untrusted_data>` tags when flagged. Raw, unmasked rows never
 touch `messages` at any point.
 
+DE-mode tool calls (the pipeline-health checks, the two remediation tools,
+notify_and_page, and score_vitals_anomaly) are dispatched through
+`agent/mcp_bridge.py`'s `MCPToolBridge` — a real MCP (Model Context Protocol)
+client that talks to `mcp_server/server.py` over stdio — instead of calling
+`agent.tools.pipeline_health`/`agent.tools.anomaly_score` functions directly
+in-process. DA-mode's `query_gold_table` deliberately stays a direct
+in-process call: masking must be the very next thing that happens to a raw
+row (see `_dispatch_query_gold_table` below), and routing that specific call
+through an extra process boundary first would add risk/complexity to the
+single most safety-critical path in this codebase for no real benefit — see
+that method's own comment. Every guardrail described below runs exactly the
+same way regardless of which path a given tool call takes; the MCP switch is
+a transport-layer change to a helper function's call, not a change to the
+guardrail wiring itself. `tests/test_mcp_server_tools.py` re-proves the
+masking and audit-trail guarantees hold with MCP-routed DE-mode dispatch.
+
 Guardrails added on top of that (see docs/architecture.md's "Guardrails"
 section for the full list with test pointers):
 - Escalation ceiling: `_dispatch_quarantine` tracks consecutive successful
@@ -42,6 +58,7 @@ from typing import Literal
 import structlog
 
 from agent.llm import Claude, ToolResult
+from agent.mcp_bridge import MCPToolBridge, get_default_bridge
 from agent.prompts import MODE_ROUTER_PROMPT, SYSTEM_PROMPT_DA, SYSTEM_PROMPT_DE
 from agent.state import OrchestratorResult
 from agent.tools import data_query, governance_guard, pipeline_health
@@ -90,6 +107,19 @@ DE_TOOLS = [
             "type": "object",
             "properties": {"message": {"type": "string"}},
             "required": ["message"],
+        },
+    },
+    {
+        "name": "score_vitals_anomaly",
+        "description": (
+            "Score one multi-vital reading (heart_rate, spo2, resp_rate, temp_c, sbp, dbp) for JOINT "
+            "anomaly risk via a local ONNX IsolationForest model — catches a plausible-looking "
+            "combination of vitals that a single-column range check would miss."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"vitals": {"type": "object"}},
+            "required": ["vitals"],
         },
     },
 ]
@@ -184,12 +214,21 @@ class OrchestratorAgent:
         duckdb_path: Path | str | None = None,
         seed_sql_path: Path | str | None = None,
         audit_log_path: Path | str | None = None,
+        mcp_bridge: MCPToolBridge | None = None,
     ) -> None:
         self.claude = claude if claude is not None else Claude()
         self.state_path = Path(state_path)
         self.duckdb_path = Path(duckdb_path) if duckdb_path else None
         self.seed_sql_path = Path(seed_sql_path) if seed_sql_path else None
         self.audit_log_path = Path(audit_log_path or os.environ.get("AUDIT_LOG_PATH", DEFAULT_AUDIT_LOG_PATH))
+        # DE-mode tool calls are dispatched through this MCP bridge (see
+        # agent/mcp_bridge.py and this module's own docstring) instead of
+        # calling agent.tools.pipeline_health/anomaly_score functions
+        # in-process directly. Defaults to the process-wide shared bridge
+        # (one MCP server subprocess for the whole process, not one per
+        # OrchestratorAgent) — tests that want an isolated/fake bridge inject
+        # their own via this parameter.
+        self.mcp_bridge = mcp_bridge if mcp_bridge is not None else get_default_bridge()
         self._tool_calls: list[str] = []
         self._remediated = False
         self._current_mode: str = "unknown"
@@ -275,6 +314,8 @@ class OrchestratorAgent:
                 if tool_name == "quarantine_bad_records"
                 else self._dispatch_restart(tool_input)
             )
+        elif tool_name == "score_vitals_anomaly":
+            result = self.mcp_bridge.dispatch("score_vitals_anomaly", tool_input)
         elif hasattr(pipeline_health, tool_name):
             result = self._dispatch_pipeline_health(tool_name, tool_input)
         else:
@@ -294,6 +335,18 @@ class OrchestratorAgent:
         if self.seed_sql_path is not None:
             kwargs["seed_sql_path"] = self.seed_sql_path
 
+        # CRITICAL, deliberate design choice: this calls agent.tools.data_query
+        # directly in-process, NOT through self.mcp_bridge, even though
+        # DE-mode's tools all go through the MCP bridge now (see this
+        # module's docstring). Masking must run as the very next thing that
+        # happens to a raw row after it's read — routing it through a real
+        # MCP round trip first would mean an extra serialize/deserialize hop
+        # for unmasked PHI to cross before enforce_masking() ever sees it,
+        # for zero benefit (query_gold_table has no side effects to
+        # standardize, unlike the DE remediation tools). mcp_server/server.py
+        # DOES expose a query_gold_table MCP tool for protocol-surface
+        # completeness/testing (tests/test_mcp_server_tools.py exercises it),
+        # it is simply never the path this production dispatch method takes.
         raw_result = data_query.query_gold_table(table, filters, **kwargs)
         if raw_result.is_error:
             return raw_result
@@ -329,9 +382,15 @@ class OrchestratorAgent:
         tools NOT gated by the kill switch or the escalation ceiling.
         quarantine_bad_records/restart_pipeline have their own dedicated
         `_dispatch_quarantine`/`_dispatch_restart` methods below.
+
+        Routed through the MCP bridge (`mcp_server/server.py` exposes the
+        exact same `agent.tools.pipeline_health` functions this used to call
+        directly) rather than `getattr(pipeline_health, tool_name)(...)` —
+        `state_path` is injected into the call here exactly as it always was,
+        just as an explicit dict key instead of a positional argument, since
+        the tool now crosses a real (if local, stdio-only) process boundary.
         """
-        fn = getattr(pipeline_health, tool_name)
-        return fn(self.state_path, **tool_input)
+        return self.mcp_bridge.dispatch(tool_name, {**tool_input, "state_path": str(self.state_path)})
 
     def _dispatch_quarantine(self, tool_input: dict) -> ToolResult:
         table = tool_input.get("table", "")
@@ -345,7 +404,8 @@ class OrchestratorAgent:
         if attempts >= ESCALATION_CEILING:
             return self._force_escalation(table, expectation, attempts)
 
-        result = pipeline_health.quarantine_bad_records(self.state_path, table, expectation)
+        quarantine_input = {"state_path": str(self.state_path), "table": table, "expectation": expectation}
+        result = self.mcp_bridge.dispatch("quarantine_bad_records", quarantine_input)
         if not result.is_error:
             self._remediated = True
             # Re-read after quarantine_bad_records's own write so we're
@@ -360,7 +420,7 @@ class OrchestratorAgent:
         if not self._autonomous_remediation_enabled():
             return self._killswitch_refusal("restart_pipeline", tool_input)
 
-        result = pipeline_health.restart_pipeline(self.state_path, **tool_input)
+        result = self.mcp_bridge.dispatch("restart_pipeline", {**tool_input, "state_path": str(self.state_path)})
         if not result.is_error:
             self._remediated = True
         return result
@@ -378,7 +438,8 @@ class OrchestratorAgent:
             f"Kill switch active (autonomous_remediation_enabled=false): refused "
             f"{tool_name}({tool_input})."
         )
-        escalation = pipeline_health.notify_and_page(self.state_path, message)
+        notify_input = {"state_path": str(self.state_path), "message": message}
+        escalation = self.mcp_bridge.dispatch("notify_and_page", notify_input)
         self._tool_calls.append("notify_and_page")
         logger.warning("kill_switch_refused_tool", tool=tool_name, tool_input=tool_input)
         payload = {
@@ -394,7 +455,8 @@ class OrchestratorAgent:
             f"Escalation ceiling reached: {table}/{expectation} still failing after "
             f"{attempts} automated quarantine attempts. Escalating instead of retrying."
         )
-        escalation = pipeline_health.notify_and_page(self.state_path, message)
+        notify_input = {"state_path": str(self.state_path), "message": message}
+        escalation = self.mcp_bridge.dispatch("notify_and_page", notify_input)
         self._tool_calls.append("notify_and_page")
         logger.warning("escalation_ceiling_reached", table=table, expectation=expectation, attempts=attempts)
         payload = {

@@ -15,6 +15,7 @@ EXPECTED_DE_TOOL_NAMES = {
     "quarantine_bad_records",
     "restart_pipeline",
     "notify_and_page",
+    "score_vitals_anomaly",
 }
 
 EXPECTED_DA_TOOL_NAMES = {"query_gold_table"}

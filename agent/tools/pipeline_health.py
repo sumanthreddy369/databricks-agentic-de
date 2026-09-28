@@ -20,13 +20,46 @@ The last two keys are read/written by agent/orchestrator.py's guardrail
 wiring (`_autonomous_remediation_enabled`, `_dispatch_quarantine`), not by
 any function in this file — they're documented here because they live in the
 same state file this module owns.
+
+Each public function below is wrapped in an OpenTelemetry span (one span per
+tool call) via the `_traced_tool` decorator — see `agent/otel.py` for the
+no-op-unless-configured exporter pattern this uses. This is independent of
+(and in addition to) `agent/orchestrator.py`'s own audit-log/tracing/guardrail
+wiring around dispatch(); it exists so an OTel-backed observability stack can
+see pipeline-health tool latency/outcomes even outside the orchestrator's own
+call path (e.g. if these functions are ever called directly, as several tests
+do).
 """
 
+import functools
 import json
 from pathlib import Path
 
 from agent.llm import ToolResult
+from agent.otel import get_tracer
 from common.contracts import PATIENT_EVENT_ENVELOPE_FIELDS
+
+
+def _traced_tool(span_name: str):
+    """Wraps a pipeline-health tool function in a span named `span_name`,
+    recording whether the resulting ToolResult was an error. Kept local to
+    this module (rather than a generic decorator in agent/otel.py) since the
+    "record result.is_error on the span" behavior is specific to functions
+    that return a ToolResult.
+    """
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            tracer = get_tracer()
+            with tracer.start_as_current_span(span_name) as span:
+                result = fn(*args, **kwargs)
+                span.set_attribute("tool.is_error", result.is_error)
+                return result
+
+        return wrapper
+
+    return decorator
 
 
 def _load(state_path: Path) -> dict:
@@ -45,6 +78,7 @@ load_state = _load
 save_state = _save
 
 
+@_traced_tool("check_expectation_metrics")
 def check_expectation_metrics(state_path: Path) -> ToolResult:
     """Real equivalent: DLT pipeline event log API
     (`GET /api/2.0/pipelines/{pipeline_id}/events`, filtered to
@@ -64,6 +98,7 @@ def check_expectation_metrics(state_path: Path) -> ToolResult:
     return ToolResult(tool_use_id="", content=json.dumps(payload))
 
 
+@_traced_tool("check_job_status")
 def check_job_status(state_path: Path) -> ToolResult:
     """Real equivalent: Jobs API `GET /api/2.1/jobs/runs/get` (or the
     Pipelines API's own status field for a DLT pipeline)."""
@@ -76,6 +111,7 @@ def check_job_status(state_path: Path) -> ToolResult:
     return ToolResult(tool_use_id="", content=json.dumps(payload))
 
 
+@_traced_tool("detect_schema_drift")
 def detect_schema_drift(state_path: Path) -> ToolResult:
     """Real equivalent: comparing the live Kafka topic schema (e.g. via a
     schema registry, or sampling recent messages) against the contract in
@@ -90,6 +126,7 @@ def detect_schema_drift(state_path: Path) -> ToolResult:
     return ToolResult(tool_use_id="", content=json.dumps(payload))
 
 
+@_traced_tool("quarantine_bad_records")
 def quarantine_bad_records(state_path: Path, table: str, expectation: str) -> ToolResult:
     """Real equivalent: re-running the DLT pipeline update with the offending
     batch's bad records routed to a quarantine table (or simply clearing the
@@ -108,6 +145,7 @@ def quarantine_bad_records(state_path: Path, table: str, expectation: str) -> To
     return ToolResult(tool_use_id="", content=json.dumps(payload))
 
 
+@_traced_tool("restart_pipeline")
 def restart_pipeline(state_path: Path, pipeline_name: str) -> ToolResult:
     """Real equivalent: Pipelines API `POST /api/2.0/pipelines/{pipeline_id}/updates`
     (or Jobs API `runs/submit`/`runs/repair` for a job-based pipeline)."""
@@ -124,6 +162,7 @@ def restart_pipeline(state_path: Path, pipeline_name: str) -> ToolResult:
     return ToolResult(tool_use_id="", content=json.dumps(payload))
 
 
+@_traced_tool("notify_and_page")
 def notify_and_page(state_path: Path, message: str) -> ToolResult:
     """Real equivalent: an incident-management/paging integration (e.g.
     PagerDuty Events API, Slack webhook). This is the escalation-only tool —

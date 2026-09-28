@@ -16,6 +16,11 @@ transient broker blip doesn't crash the whole simulator run, and `RateLimiter`
 implements the `--max-events-per-second` option, a simple token-bucket
 per-source rate limit distinct from `simulator/population.py`'s per-vital
 cadence jitter.
+
+`send()` (the publish loop's per-event call) is wrapped in an OpenTelemetry
+span per event published — see `agent/otel.py` for the no-op-unless-configured
+exporter pattern this uses; by default this creates spans but exports them
+nowhere (zero network calls), same as everywhere else this pattern appears.
 """
 
 import dataclasses
@@ -27,6 +32,7 @@ import tenacity
 import typer
 from rich.console import Console
 
+from agent.otel import get_tracer
 from common.contracts import KAFKA_TOPIC_PATIENT_EVENTS
 from simulator.domain import PatientEvent
 from simulator.population import Population
@@ -125,8 +131,16 @@ def _make_producer(bootstrap_servers: str):
 
 
 def send(producer, event: PatientEvent, topic: str = KAFKA_TOPIC_PATIENT_EVENTS) -> None:
-    _produce_with_retry(producer, topic, key=_event_key(event), value=build_event_payload(event))
-    producer.poll(0)
+    tracer = get_tracer()
+    span_attributes = {
+        "event.type": event.event_type,
+        "event.patient_id": event.patient_id,
+        "event.encounter_id": event.encounter_id,
+        "messaging.destination": topic,
+    }
+    with tracer.start_as_current_span("publish_patient_event", attributes=span_attributes):
+        _produce_with_retry(producer, topic, key=_event_key(event), value=build_event_payload(event))
+        producer.poll(0)
 
 
 @app.command()

@@ -23,6 +23,10 @@ data/state/audit_log.jsonl
 data/seed/gold.duckdb
 data/landing/
 
+# MLflow local file-based tracking store (ml/train_anomaly_model.py) — the
+# committed portfolio artifact is ml/models/vitals_anomaly.onnx, not this.
+mlruns/
+
 # OS
 .DS_Store
 Thumbs.db
