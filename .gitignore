@@ -27,6 +27,17 @@ data/landing/
 # committed portfolio artifact is ml/models/vitals_anomaly.onnx, not this.
 mlruns/
 
+# Terraform (infra/terraform/) — never applied in this environment, but
+# ignore local state/cache in case someone runs it against their own project
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# Local unzip of the committed Synthea sample archive — the .zip stays
+# tracked, extracted CSVs from a local `unzip` don't need to be
+data/reference/synthea_sample/synthea_sample_data_csv_latest/
+
 # OS
 .DS_Store
 Thumbs.db

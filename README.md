@@ -19,6 +19,39 @@ otherwise split across people:
    prompt — see [`docs/architecture.md`](docs/architecture.md) and
    `tests/test_masking_guard.py` / `tests/test_prompt_injection_guard.py`.
 
+## Architecture flow
+
+```mermaid
+flowchart TD
+    A["Patient/device event stream"] --> B["Kafka / Redpanda"]
+    A2["Provider roster files"] --> C["Databricks Autoloader"]
+    B --> D["Bronze — Delta Live Tables"]
+    C --> D
+    D --> E["Silver — apply_changes (state) /\nwatermark + dedup (vitals)"]
+    E --> F["Gold — Delta Live Tables\n+ continuous streaming aggregate"]
+    F --> G["Unity Catalog\nmasking · row filters · lineage"]
+    G --> H["MLflow + ONNX\nanomaly-detection model"]
+    G --> I["Databricks AI Search\n(pending live workspace)"]
+    G --> J["Genie\n(pending — comparison only)"]
+    H --> K["MCP tool server\n(mcp_server/server.py)"]
+    I -.-> K
+    G --> K
+    K --> L["Orchestrator agent\n(Claude tool-calling loop)"]
+    L --> M["DE mode: pipeline self-healing"]
+    L --> N["DA mode: plain-English Q&A"]
+    M --> O["notify_and_page\n(human escalation)"]
+    N --> P["Business / clinical user"]
+
+    classDef pending stroke-dasharray: 5 5
+    class I,J pending
+```
+
+Solid boxes are built and tested locally (or structurally complete for
+Databricks). Dashed boxes (**Databricks AI Search**, **Genie**) are pending
+this project's live GCP-connected Databricks workspace — see
+[Platform-native alternatives considered](#platform-native-alternatives-considered)
+below for why those aren't faked.
+
 ## Pipeline
 
 | Step | What happens | Tool | Where |
@@ -165,44 +198,6 @@ pytest                                          # full suite, mocked Anthropic c
 databricks bundle validate
 databricks bundle deploy -t dev
 ```
-
-## Status
-
-**Locally runnable and tested:**
-- `simulator/` — patient-event and provider-roster generators, and the
-  `Population.tick()` loop, driven by an injectable clock (no real sleep in
-  the core loop) for deterministic tests.
-- `agent/` — the full orchestrator (`OrchestratorAgent`), both DE and DA
-  tool sets, and the masking/injection-defense guardrail wiring, plus the
-  fuller guardrail set in [`docs/architecture.md`](docs/architecture.md#guardrails)
-  (escalation ceiling, kill switch, audit trail, anomaly detection, retry/
-  timeout, graceful degradation). The Anthropic client is fully mockable
-  (`Claude` is injected, never constructed globally) — the pytest suite makes
-  **zero real network/LLM calls** and passes with no `ANTHROPIC_API_KEY` set.
-- `data/seed/gold_seed.sql` + DuckDB — a real, queryable local stand-in for
-  the Gold schema that `agent/tools/data_query.py` runs against.
-- `pytest` and `ruff check .` both pass locally.
-- Tech stack additions backing the guardrails above: **Pydantic** (event
-  envelope validation, `common/contracts.py`), **Tenacity** (retry/backoff,
-  `agent/llm.py` + `simulator/producer.py`), **structlog** (structured
-  warning/error logs on guardrail trips), and optional **Langfuse** tracing
-  (`agent/llm.py:Tracer` — a genuine no-op with zero network calls unless
-  `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` are set; not exercised against a
-  real Langfuse account in this environment).
-- ML lifecycle: **MLflow** (local file-based tracking + Model Registry,
-  `ml/train_anomaly_model.py`), **scikit-learn** (`IsolationForest`),
-  **skl2onnx** + **onnxruntime** (export/serve the trained model as ONNX,
-  `agent/tools/anomaly_score.py`) — see
-  [`docs/architecture.md`](docs/architecture.md#ml-lifecycle-mlflow--onnx-anomaly-detection).
-- Agent protocol: the official **`mcp`** SDK — DE-mode tools are served over
-  a real MCP server (`mcp_server/server.py`) and called through an MCP client
-  bridge (`agent/mcp_bridge.py`), not just in-process function calls — see
-  [`docs/architecture.md`](docs/architecture.md#mcp-tool-architecture).
-- Infrastructure: **OpenTelemetry** (`opentelemetry-api`/`-sdk`; spans for
-  the simulator's publish loop and DE-mode tool calls, no-op unless
-  `OTEL_EXPORTER_OTLP_ENDPOINT` is set) and **`google-cloud-secret-manager`**
-  (`agent/secrets.py`, same no-op-unless-`GCP_PROJECT_ID`-is-set pattern as
-  Langfuse).
 
 ## Platform-native alternatives considered
 

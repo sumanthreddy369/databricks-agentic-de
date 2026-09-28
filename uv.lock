@@ -838,6 +838,7 @@ dependencies = [
 [package.optional-dependencies]
 databricks = [
     { name = "databricks-sql-connector" },
+    { name = "databricks-vectorsearch" },
     { name = "delta-spark" },
     { name = "pyspark" },
 ]
@@ -851,6 +852,7 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.40.0" },
     { name = "confluent-kafka", specifier = ">=2.6.0" },
     { name = "databricks-sql-connector", marker = "extra == 'databricks'", specifier = ">=3.4.0" },
+    { name = "databricks-vectorsearch", marker = "extra == 'databricks'", specifier = ">=0.40" },
     { name = "delta-spark", marker = "extra == 'databricks'", specifier = ">=3.2.0" },
     { name = "duckdb", specifier = ">=1.1.0" },
     { name = "google-cloud-secret-manager", specifier = ">=2.20.0" },
@@ -913,6 +915,20 @@ wheels = [
 ]
 
 [[package]]
+name = "databricks-vectorsearch"
+version = "0.66"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "deprecation" },
+    { name = "mlflow-skinny" },
+    { name = "protobuf" },
+    { name = "requests" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/40/43/da072250ebbc1898a92fe2384177e99a40540b35045752da48db9c2a61dd/databricks_vectorsearch-0.66-py3-none-any.whl", hash = "sha256:ca71ecb29687c0444fd3c1f2053dd250c2296b8a3e277f87231d66c7e85533bd", size = 21979, upload-time = "2026-02-19T05:10:07.121Z" },
+]
+
+[[package]]
 name = "delta-spark"
 version = "4.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -923,6 +939,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/21/1d/790855199ca10157df5552cbcfe957dcada5a82b21950e024336e67d77ad/delta_spark-4.4.0.tar.gz", hash = "sha256:7d1988ca6c3ef0ab1b886634ecdff56e930c5c2e3e479cce1125c82d7898ac3a", size = 46832, upload-time = "2026-08-20T06:38:01.32Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/03/0e/8b1df0a63b4f99fef19074c5ee51eb42423704d067c74a70b20fb688a730/delta_spark-4.4.0-py3-none-any.whl", hash = "sha256:f15cedc2c59855b1660a692f9aca1deac0c4dfcec46531b203025281b102e9c8", size = 54966, upload-time = "2026-08-20T06:38:00.261Z" },
+]
+
+[[package]]
+name = "deprecation"
+version = "2.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5a/d3/8ae2869247df154b64c1884d7346d412fed0c49df84db635aab2d1c40e62/deprecation-2.1.0.tar.gz", hash = "sha256:72b3bde64e5d778694b0cf68178aed03d15e15477116add3fb773e581f9518ff", size = 173788, upload-time = "2020-04-20T14:23:38.738Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/02/c3/253a89ee03fc9b9682f1541728eb66db7db22148cd94f89ab22528cd1e1b/deprecation-2.1.0-py2.py3-none-any.whl", hash = "sha256:a10811591210e1fb0e768a8c25517cabeabcba6f0bf96564f8ff45189f90b14a", size = 11178, upload-time = "2020-04-20T14:23:36.581Z" },
 ]
 
 [[package]]
