@@ -462,7 +462,7 @@ MLflow model version. `mlruns/` is gitignored; only the exported
 
 ## Flow: CI build and deploy
 
-**Status: Complete for `ci.yml` (runs and passes on every push/PR). The
+**Status: Complete for `ci.yml` (lint + test on every push to `master` and every PR; the same commands pass locally). The
 Databricks-side `bundle-validate.yml` job is a real, working CI job whose
 `databricks bundle validate` step is gated on repo secrets this project
 doesn't have configured, so it exercises only its own skip path here.**

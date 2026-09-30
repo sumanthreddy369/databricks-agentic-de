@@ -55,7 +55,7 @@ uv run python -m simulator.producer --patients 1000 --duration 60   # requires d
 ```
 
 CI (`.github/workflows/ci.yml`) runs exactly `uv sync --extra dev`,
-`uv run ruff check .`, `uv run pytest` on every push/PR to `main`. Match
+`uv run ruff check .`, `uv run pytest` on every push to `master` and every PR. Match
 that before considering a change done.
 
 ## Code conventions observed in this repo
