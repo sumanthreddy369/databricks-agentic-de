@@ -8,6 +8,16 @@ bundle:
 include:
   - resources/*.yml
 
+# The project's own wheel, built on `databricks bundle deploy` and installed on
+# the agent_pipeline_healthcheck job cluster (resources/workflows.yml). It
+# carries the orchestrator_healthcheck console script, the MCP server the
+# DE-mode tools run in, and the ONNX anomaly model (see pyproject.toml).
+artifacts:
+  agent_wheel:
+    type: whl
+    build: uv build --wheel
+    path: .
+
 variables:
   kafka_bootstrap_servers:
     description: >-

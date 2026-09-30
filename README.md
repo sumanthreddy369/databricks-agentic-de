@@ -56,6 +56,7 @@ behind each decision, see [`docs/architecture.md`](docs/architecture.md).
 databricks-agentic-de/
 ├── agent/                          # the locally-runnable orchestrator agent
 │   ├── orchestrator.py             # OrchestratorAgent: mode routing, dispatch, guardrail wiring
+│   ├── healthcheck.py              # orchestrator_healthcheck entry point for the scheduled DE-mode job
 │   ├── llm.py                      # Claude wrapper: tool-calling loop, retry/timeout, optional Langfuse
 │   ├── mcp_bridge.py                # MCPToolBridge: MCP client, talks to mcp_server/server.py over stdio
 │   ├── prompts.py                  # MODE_ROUTER_PROMPT, SYSTEM_PROMPT_DE, SYSTEM_PROMPT_DA
@@ -112,7 +113,7 @@ databricks-agentic-de/
 │   ├── comparisons/                # Genie / Agent Bricks / Vertex AI evaluation plans (Target, not built yet)
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
-├── tests/                          # mocked Anthropic client, zero network calls, 155 tests
+├── tests/                          # mocked Anthropic client, zero network calls, 162 tests
 ├── .github/workflows/              # ci.yml (lint+test), bundle-validate.yml (Databricks-gated)
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
@@ -514,7 +515,7 @@ flowchart LR
 **Two independent workflows, deliberately.** `ci.yml` (lint + test) always
 runs to completion with no external dependency — `uv sync --extra dev` pulls
 the `dev` optional-dependency group (`ruff`, `pytest`) from `pyproject.toml`,
-and the full 155-test suite makes zero network calls (mocked Anthropic
+and the full 162-test suite makes zero network calls (mocked Anthropic
 client throughout). `bundle-validate.yml` checks for
 `DATABRICKS_HOST`/`DATABRICKS_TOKEN` repo secrets **before** installing the
 Databricks CLI or running `databricks bundle validate`, and exits 0 with a
@@ -608,7 +609,8 @@ suite mocks this) and other optional configuration.
 | `uv run python -m simulator.autoloader_feed --interval 30 --batches 5` | Drop provider-roster JSON batch files into the landing directory |
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
-| `uv run pytest` | Run the full test suite (155 tests, zero network calls) |
+| `uv run orchestrator_healthcheck` | One scheduled-style DE-mode health check (needs `ANTHROPIC_API_KEY`); exit 0 healthy, 1 agent unavailable, 2 escalated |
+| `uv run pytest` | Run the full test suite (162 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
 | `databricks bundle validate` | Validate the Asset Bundle against a real workspace (Databricks-only) |
@@ -703,6 +705,7 @@ live infrastructure, or pure planning with no implementation at all
 | Live-workspace DE tools — expectation metrics, pipeline status, restart via the Pipelines API (`agent/tools/pipeline_health_live.py`) | Stubbed — tested against a mocked transport only; never run against a real workspace. `detect_schema_drift`/`quarantine_bad_records` have no live equivalent and return an escalate-instead error; `notify_and_page` has no paging integration yet |
 | Observability tracing — Langfuse (LLM calls), OpenTelemetry (infra) | Complete (no-op unless configured; real export not exercised against a live backend here) |
 | GCP Secret Manager integration (`agent/secrets.py`) | Complete (no-op unless `GCP_PROJECT_ID` is set) |
+| Scheduled DE health-check job (`agent/healthcheck.py`, `resources/workflows.yml:agent_pipeline_healthcheck`) | Partial — CLI tested locally, and the built wheel was installed into a clean venv and its entry point, MCP server, and ONNX model exercised from there; the job itself has never run on Databricks. Needs a `healthcare_agentic_de` secret scope and the `ops.agent_state` volume first |
 | CI — lint + test (`.github/workflows/ci.yml`) | Complete |
 | CI — bundle validate (`.github/workflows/bundle-validate.yml`) | Complete (its skip path is what actually runs here; `databricks bundle validate` itself is untested) |
 | DLT medallion pipeline (`pipeline/`) | Partial — never run; only resolves on a real Databricks cluster. Its dataset graph (names, reads, schema placement) is checked statically by `tests/test_dlt_pipeline_graph.py`; the Spark transformations are not |
@@ -719,7 +722,7 @@ live infrastructure, or pure planning with no implementation at all
 ## Testing
 
 ```bash
-uv run pytest            # full suite: 155 tests, ~110s, zero network calls
+uv run pytest            # full suite: 162 tests, ~110s, zero network calls
 uv run pytest -q         # quiet output
 uv run pytest tests/test_masking_guard.py tests/test_prompt_injection_guard.py  # the two core guardrail proofs
 uv run ruff check .      # lint

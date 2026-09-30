@@ -13,18 +13,23 @@ identity for both DE-mode pipeline-health tool calls and DA-mode
 ```sql
 GRANT USE CATALOG ON CATALOG healthcare_agentic_de TO `orchestrator_agent`;
 GRANT USE SCHEMA, SELECT ON SCHEMA healthcare_agentic_de.gold TO `orchestrator_agent`;
+GRANT USE SCHEMA ON SCHEMA healthcare_agentic_de.ops TO `orchestrator_agent`;
+GRANT READ VOLUME, WRITE VOLUME ON VOLUME healthcare_agentic_de.ops.agent_state TO `orchestrator_agent`;
 ```
 
 — see [`catalog_and_grants.sql`](catalog_and_grants.sql). That's the whole
-grant: `USE CATALOG` plus `USE SCHEMA, SELECT` on `gold` only. No `MODIFY`,
-`CREATE TABLE`, or access to `bronze`/`silver`, and no membership in
+grant: `USE CATALOG`, `USE SCHEMA, SELECT` on `gold`, and read/write on the
+`ops.agent_state` volume, which holds only the scheduled agent job's own
+state file and audit log (kill switch, escalation counters, incidents) so
+they survive between runs on ephemeral clusters. No `MODIFY` or `CREATE
+TABLE` on any schema, no access to `bronze`/`silver`, and no membership in
 `phi_unmasked` (the break-glass group that sees unmasked PHI) — that
 membership is never granted anywhere in this file, and `catalog_and_grants.sql`
 says so explicitly at the grant site as a standing reminder not to add it.
 
 This is deliberate minimum-necessary access, not an oversight: the
 orchestrator agent's actual job (answer questions over Gold, check/remediate
-pipeline health via the local state file) never requires write access to any
+pipeline health, keep its own state file) never requires write access to any
 Unity Catalog table, or read access below Gold, or unmasked PHI. Narrowing the
 grant to exactly what's used means a prompt-injection attempt that somehow
 got an LLM call to *want* to do something destructive (drop a table, read

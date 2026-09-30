@@ -152,6 +152,14 @@ ESCALATION_CEILING = 3
 # ordinary queryable data it could speculate about.
 GROUNDEDNESS_REFUSAL = "No matching rows found for this query — do not speculate."
 
+# Graceful-degradation guardrail: the fixed answer handle() returns when the
+# Claude call path raises. A named constant so callers (agent/healthcheck.py)
+# can tell "the agent couldn't run" apart from a real answer.
+AGENT_UNAVAILABLE_ANSWER = (
+    "Agent unavailable — Delta Live Tables expectations continue enforcing "
+    "data quality independently of this agent."
+)
+
 DEFAULT_AUDIT_LOG_PATH = "data/state/audit_log.jsonl"
 
 _REMEDIATION_TOOLS = ("quarantine_bad_records", "restart_pipeline")
@@ -217,7 +225,11 @@ class OrchestratorAgent:
         mcp_bridge: MCPToolBridge | None = None,
     ) -> None:
         self.claude = claude if claude is not None else Claude()
-        self.state_path = Path(state_path)
+        # Absolute, because this path is handed to the MCP server subprocess,
+        # whose working directory is the package location (the repo root
+        # from source, site-packages from an installed wheel), not ours. A
+        # relative path would silently point at a different file there.
+        self.state_path = Path(state_path).resolve()
         self.duckdb_path = Path(duckdb_path) if duckdb_path else None
         self.seed_sql_path = Path(seed_sql_path) if seed_sql_path else None
         self.audit_log_path = Path(audit_log_path or os.environ.get("AUDIT_LOG_PATH", DEFAULT_AUDIT_LOG_PATH))
@@ -265,10 +277,7 @@ class OrchestratorAgent:
             logger.error("claude_call_failed_graceful_degradation", mode=resolved_mode)
             return OrchestratorResult(
                 mode=resolved_mode,
-                answer=(
-                    "Agent unavailable — Delta Live Tables expectations continue enforcing "
-                    "data quality independently of this agent."
-                ),
+                answer=AGENT_UNAVAILABLE_ANSWER,
                 tool_calls=list(self._tool_calls),
                 remediated=False,
             )

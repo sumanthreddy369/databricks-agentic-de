@@ -8,6 +8,13 @@ CREATE SCHEMA IF NOT EXISTS healthcare_agentic_de.bronze;
 CREATE SCHEMA IF NOT EXISTS healthcare_agentic_de.silver;
 CREATE SCHEMA IF NOT EXISTS healthcare_agentic_de.gold;
 
+-- Operational state for the scheduled agent job (resources/workflows.yml:
+-- agent_pipeline_healthcheck): its kill switch, escalation-ceiling counters,
+-- incidents, and append-only audit log live in files on this volume so they
+-- survive between runs on ephemeral job clusters. No table data lives here.
+CREATE SCHEMA IF NOT EXISTS healthcare_agentic_de.ops;
+CREATE VOLUME IF NOT EXISTS healthcare_agentic_de.ops.agent_state;
+
 -- Service principal / role for the Kafka + Autoloader ingest jobs.
 CREATE GROUP IF NOT EXISTS ingest_svc;
 GRANT USE CATALOG ON CATALOG healthcare_agentic_de TO `ingest_svc`;
@@ -28,6 +35,10 @@ GRANT USE SCHEMA, CREATE TABLE, MODIFY, SELECT ON SCHEMA healthcare_agentic_de.g
 CREATE GROUP IF NOT EXISTS orchestrator_agent;
 GRANT USE CATALOG ON CATALOG healthcare_agentic_de TO `orchestrator_agent`;
 GRANT USE SCHEMA, SELECT ON SCHEMA healthcare_agentic_de.gold TO `orchestrator_agent`;
+-- Its only write access anywhere: its own state files on the ops volume. No
+-- table in any schema is writable by this group.
+GRANT USE SCHEMA ON SCHEMA healthcare_agentic_de.ops TO `orchestrator_agent`;
+GRANT READ VOLUME, WRITE VOLUME ON VOLUME healthcare_agentic_de.ops.agent_state TO `orchestrator_agent`;
 -- orchestrator_agent is intentionally NEVER granted membership in
 -- `phi_unmasked` below — do not add it there.
 
