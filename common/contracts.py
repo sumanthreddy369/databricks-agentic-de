@@ -54,6 +54,12 @@ ENCOUNTER_WATERMARK_MINUTES = 30
 # agent reads and hands to an LLM.
 MASKED_COLUMNS = {"dim_patients": {"full_name", "mrn"}}
 
+# Unity Catalog schema the agent-facing Gold tables are published to. The
+# `orchestrator_agent` group's only SELECT grant is on this schema
+# (governance/05_unity_catalog/catalog_and_grants.sql), so the DLT gold step
+# (pipeline/04_gold/) and the live DA-mode query path must both use it.
+GOLD_SCHEMA = "healthcare_agentic_de.gold"
+
 # Illustrative vital-sign bands used ONLY to drive the synthetic simulator and
 # to bound-check generated readings in Silver. These are rough clinical bands
 # for realism, NOT sourced from real patient data, Synthea, or MIMIC-IV — do

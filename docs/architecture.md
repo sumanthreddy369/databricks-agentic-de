@@ -42,7 +42,7 @@ it's trained. All seven are dispatched through the MCP bridge described in
 "MCP tool architecture" below, not called in-process directly.
 
 The pipeline itself encodes a hard rule the agent must respect:
-`known_event_type` in `pipeline/03_silver/silver_encounters.py` is a hard-stop
+`known_event_type` in `pipeline/03_silver/silver_patient_events.py` is a hard-stop
 expectation (`dlt.expect_or_fail`) — an event_type outside the four the
 system understands is a genuine contract break, not a data-quality nuisance.
 The DE system prompt instructs the agent to escalate (`notify_and_page`)
@@ -95,8 +95,8 @@ uniformly, and one deployment unit (`resources/dlt_pipeline.yml`) instead of
 juggling job dependencies by hand.
 
 Two write patterns are used deliberately for two different semantics in
-Silver: `dlt.apply_changes` (CDC/upsert) for mutable state (`dim_patients`,
-`fct_encounters`), vs. `withWatermark` + `dropDuplicatesWithinWatermark`
+Silver: `dlt.apply_changes` (CDC/upsert) for mutable state (`silver_dim_patients`,
+`silver_fct_encounters`), vs. `withWatermark` + `dropDuplicatesWithinWatermark`
 (append-only) for the immutable vitals time series
 (`pipeline/03_silver/silver_vitals.py` — see its docstring for the full
 rationale).

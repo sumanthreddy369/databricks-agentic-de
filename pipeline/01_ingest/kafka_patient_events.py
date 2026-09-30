@@ -10,14 +10,20 @@ Bronze is expected to carry that column through untouched (see
 02_bronze/bronze_patient_events.py).
 """
 
+import sys
+
 import dlt
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-from common.contracts import KAFKA_TOPIC_PATIENT_EVENTS
-from pipeline.common.schemas import PATIENT_EVENT_SCHEMA
-
 spark = SparkSession.getActiveSession()
+
+# DLT doesn't put the bundle root on sys.path, so project imports need it
+# added explicitly; resources/dlt_pipeline.yml sets bundle.sourcePath.
+sys.path.append(spark.conf.get("bundle.sourcePath", "."))
+
+from common.contracts import KAFKA_TOPIC_PATIENT_EVENTS  # noqa: E402
+from pipeline.common.schemas import PATIENT_EVENT_SCHEMA  # noqa: E402
 
 KAFKA_BOOTSTRAP_SERVERS = spark.conf.get(
     "pipeline.kafka_bootstrap_servers", "localhost:19092"

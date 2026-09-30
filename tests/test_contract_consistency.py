@@ -32,7 +32,9 @@ def test_silver_vitals_uses_watermark_not_apply_changes():
     assert "dlt.apply_changes(" not in silver_vitals
 
 
-def test_silver_encounters_has_hard_stop_expectation():
-    silver_encounters = (REPO_ROOT / "pipeline" / "03_silver" / "silver_encounters.py").read_text()
-    assert "expect_or_fail" in silver_encounters
-    assert "known_event_type" in silver_encounters
+def test_silver_contract_gate_has_hard_stop_expectation():
+    # tests/test_dlt_pipeline_graph.py additionally proves this gate reads
+    # Bronze unfiltered and sits upstream of every Silver consumer.
+    contract_gate = (REPO_ROOT / "pipeline" / "03_silver" / "silver_patient_events.py").read_text()
+    assert "expect_or_fail" in contract_gate
+    assert "known_event_type" in contract_gate

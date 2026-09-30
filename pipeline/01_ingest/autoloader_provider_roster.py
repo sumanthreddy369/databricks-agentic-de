@@ -16,12 +16,18 @@ alternative if UC-managed storage is preferred over a raw bucket path — either
 way this is the only line that would need to change.
 """
 
+import sys
+
 import dlt
 from pyspark.sql import SparkSession
 
-from pipeline.common.schemas import PROVIDER_ROSTER_SCHEMA
-
 spark = SparkSession.getActiveSession()
+
+# DLT doesn't put the bundle root on sys.path, so project imports need it
+# added explicitly; resources/dlt_pipeline.yml sets bundle.sourcePath.
+sys.path.append(spark.conf.get("bundle.sourcePath", "."))
+
+from pipeline.common.schemas import PROVIDER_ROSTER_SCHEMA  # noqa: E402
 
 PROVIDER_LANDING_PATH = spark.conf.get(
     "pipeline.provider_landing_path", "gs://healthcare-agentic-de-landing/providers"

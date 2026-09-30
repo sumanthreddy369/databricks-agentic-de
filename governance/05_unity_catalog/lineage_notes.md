@@ -11,6 +11,7 @@ graph cannot be generated or screenshotted here — this note exists so a
 reader isn't left assuming lineage was captured and simply not shown. Once
 deployed, the expected graph is exactly the flow this repo's directory
 structure encodes: `raw_patient_events` -> `bronze_patient_events` ->
-(`fct_encounters` / `dim_patients` / `fct_vitals`) -> (`gold_live_vitals_by_unit`,
-the Gold passthrough tables), plus the parallel, slower
+`silver_contract_checked_events` -> (`silver_fct_encounters` / `silver_dim_patients` /
+`silver_fct_vitals`) -> (`gold_live_vitals_by_unit`,
+the Gold passthrough tables in `healthcare_agentic_de.gold`), plus the parallel, slower
 `raw_provider_roster` -> ... -> `dim_providers` path.

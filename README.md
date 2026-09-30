@@ -84,7 +84,7 @@ databricks-agentic-de/
 ├── pipeline/                       # Databricks-only DLT; structurally complete, never run here
 │   ├── 01_ingest/                  # kafka_patient_events.py, autoloader_provider_roster.py
 │   ├── 02_bronze/                  # bronze_patient_events.py, bronze_provider_roster.py
-│   ├── 03_silver/                  # silver_encounters.py (apply_changes), silver_vitals.py (watermark), silver_providers.py
+│   ├── 03_silver/                  # silver_patient_events.py (hard stop), silver_encounters.py (apply_changes), silver_vitals.py (watermark), silver_providers.py
 │   ├── 04_gold/                    # gold_encounters.py, gold_providers.py, gold_vitals.py (+ streaming aggregate)
 │   └── common/schemas.py           # PySpark StructTypes, cross-checked against common/contracts.py
 ├── governance/05_unity_catalog/    # Unity Catalog SQL; Databricks-only, never run here
@@ -110,7 +110,7 @@ databricks-agentic-de/
 │   ├── comparisons/                # Genie / Agent Bricks / Vertex AI evaluation plans (Target, not built yet)
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
-├── tests/                          # mocked Anthropic client, zero network calls, 116 tests
+├── tests/                          # mocked Anthropic client, zero network calls, 123 tests
 ├── .github/workflows/              # ci.yml (lint+test), bundle-validate.yml (Databricks-gated)
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
@@ -135,12 +135,13 @@ flowchart LR
         B --> E["bronze_patient_events.py"]
         D --> F["bronze_provider_roster.py"]
     end
-    subgraph Silver["03_silver"]
-        E -->|"apply_changes: CDC upsert"| G["silver_encounters.py\nfct_encounters, dim_patients"]
-        E -->|"withWatermark + dropDuplicates"| H["silver_vitals.py\nfct_vitals"]
-        F --> I["silver_providers.py"]
+    subgraph Silver["03_silver - default schema: silver"]
+        E --> S["silver_patient_events.py\nknown_event_type hard stop"]
+        S -->|"apply_changes: CDC upsert"| G["silver_encounters.py\nsilver_fct_encounters, silver_dim_patients"]
+        S -->|"withWatermark + dropDuplicates"| H["silver_vitals.py\nsilver_fct_vitals"]
+        F -->|"apply_changes: latest row per provider"| I["silver_providers.py"]
     end
-    subgraph Gold["04_gold"]
+    subgraph Gold["04_gold - published to healthcare_agentic_de.gold"]
         G --> J["gold_encounters.py"]
         H --> K["gold_vitals.py\n+ gold_live_vitals_by_unit"]
         I --> L["gold_providers.py"]
@@ -172,17 +173,25 @@ makes the keep/drop decision.
 
 **Silver uses two write patterns for two different semantics**:
 - `dlt.apply_changes` (CDC/upsert) for `silver_encounters.py`'s
-  `fct_encounters`/`dim_patients` — mutable state where "latest wins."
+  `silver_fct_encounters`/`silver_dim_patients` — mutable state where
+  "latest wins." Each event type carries a different slice of that state
+  (`transferred` only has the new unit, `discharged` has none), so each CDC
+  source is a view that flattens events onto the target columns, and
+  `ignore_null_updates=True` keeps whatever an event doesn't carry. A
+  discharge sets `status = 'discharged'` rather than deleting the encounter.
 - `withWatermark` + `dropDuplicatesWithinWatermark` (append-only) for
-  `silver_vitals.py`'s `fct_vitals` — an immutable time series where a new
-  reading is always a new row.
+  `silver_vitals.py`'s `silver_fct_vitals` — an immutable time series where a
+  new reading is always a new row.
 
-**`known_event_type` is a hard stop.** `silver_encounters.py` uses
+**`known_event_type` is a hard stop.** `silver_patient_events.py` uses
 `dlt.expect_or_fail` on `event_type` — an event type outside the four the
 system understands (`admitted`, `vitals_reading`, `transferred`,
 `discharged`) is a genuine upstream contract break, not a quarantinable
 data-quality nuisance, and must fail the pipeline so the orchestrator
-escalates via `notify_and_page` instead of silently working around it. By
+escalates via `notify_and_page` instead of silently working around it. That
+view reads Bronze unfiltered and is the only Silver dataset that reads Bronze
+at all, so no consumer can filter an unknown type away before the check sees
+it (`tests/test_dlt_pipeline_graph.py` asserts both). By
 contrast, `plausible_vital_value` in `silver_vitals.py` is `expect_or_drop`
 (a physically impossible vital, e.g. negative heart rate, is safe to drop
 silently) and `known_vital_item` is warn-only `expect` (an unrecognized
@@ -193,6 +202,19 @@ heart rate and an out-of-range count, windowed over a trailing 15 minutes and
 grouped by unit — advancing continuously as new vitals arrive, not a batch
 job. The rest of Gold is a thin passthrough that gives BI/agent consumers a
 stable, documented table name.
+
+**Gold lives in its own schema.** Both pipelines use DLT's default publishing
+mode (`schema: silver` in `resources/dlt_pipeline.yml`), and every
+`pipeline/04_gold/` table is published by fully-qualified name into
+`healthcare_agentic_de.gold` (`common.contracts.GOLD_SCHEMA`) — the only
+schema `orchestrator_agent` can `SELECT` from and the one the Unity Catalog
+masks target. Silver sources carry `silver_`-prefixed names because one DLT
+pipeline can't define two datasets with the same name.
+`tests/test_dlt_pipeline_graph.py` loads every bundle library against a
+recording fake `dlt` module and checks the dataset graph statically: no
+duplicate names, every read resolves inside its own pipeline, every
+agent-queryable table is published to `gold`. It can't check the Spark
+transformations themselves; only a real pipeline run can.
 
 ---
 
@@ -483,7 +505,7 @@ flowchart LR
 **Two independent workflows, deliberately.** `ci.yml` (lint + test) always
 runs to completion with no external dependency — `uv sync --extra dev` pulls
 the `dev` optional-dependency group (`ruff`, `pytest`) from `pyproject.toml`,
-and the full 116-test suite makes zero network calls (mocked Anthropic
+and the full 123-test suite makes zero network calls (mocked Anthropic
 client throughout). `bundle-validate.yml` checks for
 `DATABRICKS_HOST`/`DATABRICKS_TOKEN` repo secrets **before** installing the
 Databricks CLI or running `databricks bundle validate`, and exits 0 with a
@@ -577,7 +599,7 @@ suite mocks this) and other optional configuration.
 | `uv run python -m simulator.autoloader_feed --interval 30 --batches 5` | Drop provider-roster JSON batch files into the landing directory |
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
-| `uv run pytest` | Run the full test suite (116 tests, zero network calls) |
+| `uv run pytest` | Run the full test suite (123 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
 | `databricks bundle validate` | Validate the Asset Bundle against a real workspace (Databricks-only) |
@@ -672,7 +694,7 @@ live infrastructure, or pure planning with no implementation at all
 | GCP Secret Manager integration (`agent/secrets.py`) | Complete (no-op unless `GCP_PROJECT_ID` is set) |
 | CI — lint + test (`.github/workflows/ci.yml`) | Complete |
 | CI — bundle validate (`.github/workflows/bundle-validate.yml`) | Complete (its skip path is what actually runs here; `databricks bundle validate` itself is untested) |
-| DLT medallion pipeline (`pipeline/`) | Partial — structurally correct, never run; only resolves on a real Databricks cluster |
+| DLT medallion pipeline (`pipeline/`) | Partial — never run; only resolves on a real Databricks cluster. Its dataset graph (names, reads, schema placement) is checked statically by `tests/test_dlt_pipeline_graph.py`; the Spark transformations are not |
 | Unity Catalog grants + masking/row-filter SQL (`governance/05_unity_catalog/*.sql`, excluding BigQuery federation) | Partial — structurally correct, never run against a real metastore |
 | Databricks Asset Bundle (`databricks.yml`, `resources/*.yml`) | Partial — structurally correct, never deployed |
 | Databricks Vector Search knowledge tool (`agent/tools/knowledge_search.py`) | Stubbed — real graceful-degradation code path, never queried a live index |
@@ -686,7 +708,7 @@ live infrastructure, or pure planning with no implementation at all
 ## Testing
 
 ```bash
-uv run pytest            # full suite: 116 tests, ~110s, zero network calls
+uv run pytest            # full suite: 123 tests, ~110s, zero network calls
 uv run pytest -q         # quiet output
 uv run pytest tests/test_masking_guard.py tests/test_prompt_injection_guard.py  # the two core guardrail proofs
 uv run ruff check .      # lint

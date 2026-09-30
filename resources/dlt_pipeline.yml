@@ -9,21 +9,31 @@
 # cloud-native managed alternative to self-hosting Kafka for this same
 # continuous ingestion path (not swapped in here — see the
 # `kafka_bootstrap_servers` variable description in databricks.yml for why).
+#
+# `schema:` (not the legacy `target:`) puts both pipelines in DLT's default
+# publishing mode, which is what lets pipeline/04_gold/ publish its tables
+# into healthcare_agentic_de.gold by fully-qualified name while everything
+# else lands in the `silver` default schema. `bundle.sourcePath` is read by
+# every pipeline file that imports project modules (common.contracts,
+# pipeline.common.schemas), since DLT doesn't put the bundle root on sys.path.
 resources:
   pipelines:
     streaming_patient_pipeline:
       name: streaming_patient_pipeline
       catalog: healthcare_agentic_de
-      target: silver
+      schema: silver
       continuous: true
       photon: true
       configuration:
+        bundle.sourcePath: ${workspace.file_path}
         pipeline.kafka_bootstrap_servers: "${var.kafka_bootstrap_servers}"
       libraries:
         - file:
             path: ../pipeline/01_ingest/kafka_patient_events.py
         - file:
             path: ../pipeline/02_bronze/bronze_patient_events.py
+        - file:
+            path: ../pipeline/03_silver/silver_patient_events.py
         - file:
             path: ../pipeline/03_silver/silver_encounters.py
         - file:
@@ -40,10 +50,11 @@ resources:
     reference_data_pipeline:
       name: reference_data_pipeline
       catalog: healthcare_agentic_de
-      target: silver
+      schema: silver
       continuous: false
       photon: true
       configuration:
+        bundle.sourcePath: ${workspace.file_path}
         pipeline.provider_landing_path: "${var.provider_landing_path}"
       libraries:
         - file:
