@@ -61,10 +61,12 @@ databricks-agentic-de/
 │   ├── prompts.py                  # MODE_ROUTER_PROMPT, SYSTEM_PROMPT_DE, SYSTEM_PROMPT_DA
 │   ├── state.py                    # OrchestratorResult dataclass
 │   ├── secrets.py                  # GCP Secret Manager, no-op unless GCP_PROJECT_ID is set
+│   ├── databricks_client.py        # Databricks REST client (SQL statements, Pipelines API), no-op unless configured
 │   ├── otel.py                     # OpenTelemetry tracer, no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set
 │   └── tools/
 │       ├── pipeline_health.py      # DE tools: check_expectation_metrics, quarantine, restart, notify_and_page
-│       ├── data_query.py           # DA tool: query_gold_table (DuckDB locally)
+│       ├── pipeline_health_live.py # live-workspace backend for the DE tools (Pipelines API)
+│       ├── data_query.py           # DA tool: query_gold_table (DuckDB locally, SQL warehouse when configured)
 │       ├── governance_guard.py     # enforce_masking + scan_for_injection guardrails
 │       ├── anomaly_score.py        # score_vitals_anomaly: ONNX inference
 │       └── knowledge_search.py     # Databricks Vector Search tool (Stubbed, degrades cleanly)
@@ -110,7 +112,7 @@ databricks-agentic-de/
 │   ├── comparisons/                # Genie / Agent Bricks / Vertex AI evaluation plans (Target, not built yet)
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
-├── tests/                          # mocked Anthropic client, zero network calls, 123 tests
+├── tests/                          # mocked Anthropic client, zero network calls, 155 tests
 ├── .github/workflows/              # ci.yml (lint+test), bundle-validate.yml (Databricks-gated)
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
@@ -332,6 +334,13 @@ through the MCP bridge every other DE-mode tool uses — see the
 [MCP tool call path](#flow-mcp-tool-call-path) flow below for the full
 reasoning.
 
+**A filter can't be used to confirm a masked value.** `query_gold_table`
+refuses a filter on a masked column: masking redacts `full_name` in the
+returned rows, but `{"full_name": "Jane Alvarez"}` would otherwise confirm
+the name by whether any row came back. Filter keys must be plain identifiers
+and values are always bound parameters, on the DuckDB and live-warehouse
+backends alike (`tests/test_data_query_live.py`).
+
 **A zero-row result is a refusal, not empty data.** An empty
 `query_gold_table` result is short-circuited to a fixed
 `GROUNDEDNESS_REFUSAL` string instead of flowing to the model as ordinary
@@ -505,7 +514,7 @@ flowchart LR
 **Two independent workflows, deliberately.** `ci.yml` (lint + test) always
 runs to completion with no external dependency — `uv sync --extra dev` pulls
 the `dev` optional-dependency group (`ruff`, `pytest`) from `pyproject.toml`,
-and the full 123-test suite makes zero network calls (mocked Anthropic
+and the full 155-test suite makes zero network calls (mocked Anthropic
 client throughout). `bundle-validate.yml` checks for
 `DATABRICKS_HOST`/`DATABRICKS_TOKEN` repo secrets **before** installing the
 Databricks CLI or running `databricks bundle validate`, and exits 0 with a
@@ -599,7 +608,7 @@ suite mocks this) and other optional configuration.
 | `uv run python -m simulator.autoloader_feed --interval 30 --batches 5` | Drop provider-roster JSON batch files into the landing directory |
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
-| `uv run pytest` | Run the full test suite (123 tests, zero network calls) |
+| `uv run pytest` | Run the full test suite (155 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
 | `databricks bundle validate` | Validate the Asset Bundle against a real workspace (Databricks-only) |
@@ -690,6 +699,8 @@ live infrastructure, or pure planning with no implementation at all
 | Graceful degradation on Claude API failure | Complete |
 | ONNX joint anomaly-scoring model + training pipeline (`ml/`) | Complete |
 | DuckDB-backed local Gold stand-in (`agent/tools/data_query.py`) | Complete |
+| Live-workspace DA queries — SQL Statement Execution API against `healthcare_agentic_de.gold` (`agent/databricks_client.py`, `data_query.py`) | Stubbed — request/response handling tested against a mocked transport only; never run against a real warehouse. No-op unless `DATABRICKS_HOST`/`DATABRICKS_TOKEN`/`DATABRICKS_WAREHOUSE_ID` are set |
+| Live-workspace DE tools — expectation metrics, pipeline status, restart via the Pipelines API (`agent/tools/pipeline_health_live.py`) | Stubbed — tested against a mocked transport only; never run against a real workspace. `detect_schema_drift`/`quarantine_bad_records` have no live equivalent and return an escalate-instead error; `notify_and_page` has no paging integration yet |
 | Observability tracing — Langfuse (LLM calls), OpenTelemetry (infra) | Complete (no-op unless configured; real export not exercised against a live backend here) |
 | GCP Secret Manager integration (`agent/secrets.py`) | Complete (no-op unless `GCP_PROJECT_ID` is set) |
 | CI — lint + test (`.github/workflows/ci.yml`) | Complete |
@@ -708,7 +719,7 @@ live infrastructure, or pure planning with no implementation at all
 ## Testing
 
 ```bash
-uv run pytest            # full suite: 123 tests, ~110s, zero network calls
+uv run pytest            # full suite: 155 tests, ~110s, zero network calls
 uv run pytest -q         # quiet output
 uv run pytest tests/test_masking_guard.py tests/test_prompt_injection_guard.py  # the two core guardrail proofs
 uv run ruff check .      # lint

@@ -1,10 +1,16 @@
 """DE-mode tools: pipeline health checks and remediation actions.
 
 Every function reads and writes a local JSON state file (path injected via
-`state_path`) instead of calling a live Databricks workspace, so the whole
-DE-mode loop is testable without a cluster. Each docstring names the real
-Databricks REST API the function stands in for — swapping these for real API
-calls is the only change needed to run this against a live workspace.
+`state_path`) by default, so the whole DE-mode loop is testable without a
+cluster. When a live workspace is configured (`DATABRICKS_HOST`,
+`DATABRICKS_TOKEN`, `DATABRICKS_PIPELINE_IDS`), the health checks and
+`restart_pipeline` delegate to `agent/tools/pipeline_health_live.py`, which
+calls the Databricks REST API each docstring below names;
+`detect_schema_drift` and `quarantine_bad_records` return an explicit
+"no live implementation" error there (see that module for why), and
+`notify_and_page` stays local. The state file itself is still required in
+live mode: the orchestrator keeps its kill switch, escalation-ceiling
+counters, and incidents in it.
 
 State file shape (see data/state/pipeline_state.example.json):
 {
@@ -37,6 +43,7 @@ from pathlib import Path
 
 from agent.llm import ToolResult
 from agent.otel import get_tracer
+from agent.tools import pipeline_health_live
 from common.contracts import PATIENT_EVENT_ENVELOPE_FIELDS
 
 
@@ -86,6 +93,9 @@ def check_expectation_metrics(state_path: Path) -> ToolResult:
 
     Flags any expectation whose failure_count is > 0.
     """
+    live = pipeline_health_live.live_backend()
+    if live is not None:
+        return pipeline_health_live.check_expectation_metrics(live)
     state = _load(state_path)
     failing = []
     for table, table_state in state.get("tables", {}).items():
@@ -102,6 +112,9 @@ def check_expectation_metrics(state_path: Path) -> ToolResult:
 def check_job_status(state_path: Path) -> ToolResult:
     """Real equivalent: Jobs API `GET /api/2.1/jobs/runs/get` (or the
     Pipelines API's own status field for a DLT pipeline)."""
+    live = pipeline_health_live.live_backend()
+    if live is not None:
+        return pipeline_health_live.check_job_status(live)
     state = _load(state_path)
     jobs = state.get("jobs", {})
     unhealthy = {
@@ -116,6 +129,9 @@ def detect_schema_drift(state_path: Path) -> ToolResult:
     """Real equivalent: comparing the live Kafka topic schema (e.g. via a
     schema registry, or sampling recent messages) against the contract in
     common.contracts.PATIENT_EVENT_ENVELOPE_FIELDS."""
+    live = pipeline_health_live.live_backend()
+    if live is not None:
+        return pipeline_health_live.unsupported("detect_schema_drift")
     state = _load(state_path)
     observed = state.get("schema_snapshot", {}).get("patient_events", [])
     expected = list(PATIENT_EVENT_ENVELOPE_FIELDS)
@@ -131,6 +147,9 @@ def quarantine_bad_records(state_path: Path, table: str, expectation: str) -> To
     """Real equivalent: re-running the DLT pipeline update with the offending
     batch's bad records routed to a quarantine table (or simply clearing the
     condition upstream and letting the expectation re-evaluate clean)."""
+    live = pipeline_health_live.live_backend()
+    if live is not None:
+        return pipeline_health_live.unsupported("quarantine_bad_records")
     state = _load(state_path)
     try:
         state["tables"][table]["expectations"][expectation]["failure_count"] = 0
@@ -149,6 +168,9 @@ def quarantine_bad_records(state_path: Path, table: str, expectation: str) -> To
 def restart_pipeline(state_path: Path, pipeline_name: str) -> ToolResult:
     """Real equivalent: Pipelines API `POST /api/2.0/pipelines/{pipeline_id}/updates`
     (or Jobs API `runs/submit`/`runs/repair` for a job-based pipeline)."""
+    live = pipeline_health_live.live_backend()
+    if live is not None:
+        return pipeline_health_live.restart_pipeline(live, pipeline_name)
     state = _load(state_path)
     if pipeline_name not in state.get("jobs", {}):
         error_payload = {"ok": False, "error": f"unknown pipeline: {pipeline_name}"}

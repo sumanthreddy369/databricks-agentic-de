@@ -53,8 +53,15 @@ rather than attempt to quarantine or restart past a hard-stop failure. See
 ## DA mode: answer questions over governed data, safely
 
 `agent/tools/data_query.py:query_gold_table` runs SQL against a local DuckDB
-file seeded from `data/seed/gold_seed.sql` (swap point for
-`databricks-sql-connector` in a real deployment is marked in that file).
+file seeded from `data/seed/gold_seed.sql` by default. With
+`DATABRICKS_HOST`/`DATABRICKS_TOKEN`/`DATABRICKS_WAREHOUSE_ID` set, the same
+query runs against `healthcare_agentic_de.gold` through the SQL Statement
+Execution API (`agent/databricks_client.py`) instead. That path is tested
+only against a mocked transport, not a real warehouse. The DE-mode tools
+follow the same pattern through `agent/tools/pipeline_health_live.py` when
+`DATABRICKS_PIPELINE_IDS` is also set. Either way the orchestrator's
+`_dispatch` wiring below is unchanged, and masking runs on live rows exactly
+as on local ones.
 
 The guardrail wiring lives in `OrchestratorAgent._dispatch`:
 
@@ -216,6 +223,7 @@ file" is where the guardrail runs; "Test" is what proves it.
 | Input validation | `common.contracts.PatientEvent`/`VitalReading` (Pydantic) reject malformed envelopes (bad `event_type`/`itemid`, wrong types, unknown fields) at construction; out-of-range vitals are flagged, not rejected — mirrors DLT `expect` vs `expect_or_drop` | `common/contracts.py` | `tests/test_contracts_pydantic.py` |
 | Input-size limit | `MAX_NOTES_LENGTH` caps text scanned by the injection guard, defending against a padded-out adversarial payload | `agent/tools/governance_guard.py:scan_for_injection` | `tests/test_prompt_injection_guard.py` |
 | Output-size / groundedness | A zero-row `query_gold_table` result is short-circuited to a fixed refusal instead of flowing to the model as ordinary data; oversized results are capped (`MAX_TOOL_RESULT_ROWS`, `MAX_TOOL_RESULT_CHARS`) before ever reaching `messages` | `agent/orchestrator.py:_dispatch_query_gold_table`, `_apply_output_size_guard` | `tests/test_groundedness_refusal.py` |
+| Query-shape validation | `query_gold_table` refuses a filter on a masked column (a `{"full_name": ...}` filter would confirm a name by whether rows come back, even though the returned value is redacted), accepts only plain-identifier filter keys and scalar values bound as parameters, and caps rows in the query itself — identically on the DuckDB and live-warehouse backends | `agent/tools/data_query.py:_build_query` | `tests/test_data_query_live.py` |
 | Tool allowlisting / blast radius | Only 7 DE tools and 1 DA tool are ever passed to Claude; no destructive (drop/delete/truncate-shaped) tool exists anywhere in the codebase | `agent/orchestrator.py:DE_TOOLS`/`DA_TOOLS` | `tests/test_tool_allowlist.py` |
 | Escalation ceiling | A (table, expectation) pair that's already been "fixed" 3 times and is still failing is refused a 4th quarantine attempt and forced to `notify_and_page` — enforced in the dispatch wrapper, since the model can't be trusted to self-limit a retry loop | `agent/orchestrator.py:_dispatch_quarantine`, `ESCALATION_CEILING` | `tests/test_escalation_ceiling.py` |
 | Kill switch | `autonomous_remediation_enabled` (state-file flag, default true) gates `quarantine_bad_records`/`restart_pipeline`; read-only health checks and `notify_and_page` are never gated | `agent/orchestrator.py:_autonomous_remediation_enabled`, `_killswitch_refusal` | `tests/test_kill_switch.py` |

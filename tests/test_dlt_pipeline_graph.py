@@ -254,7 +254,5 @@ def test_encounter_and_vitals_consumers_read_the_contract_checked_stream(pipelin
     hard-stop view, or an unknown event type could reach it anyway."""
     graph = pipelines["streaming_patient_pipeline"]
     carrier = next(ds.name for ds in graph.datasets.values() if "known_event_type" in ds.expectations)
-    direct_bronze_readers = {
-        ds.name for ds in graph.datasets.values() if "bronze_patient_events" in ds.reads
-    }
+    direct_bronze_readers = {ds.name for ds in graph.datasets.values() if "bronze_patient_events" in ds.reads}
     assert direct_bronze_readers == {carrier}

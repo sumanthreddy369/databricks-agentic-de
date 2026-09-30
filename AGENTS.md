@@ -28,7 +28,8 @@ agent/                  # orchestrator agent: mode routing, dispatch, guardrails
   orchestrator.py        # OrchestratorAgent — the central file; read this first
   llm.py                 # Claude wrapper: tool-calling loop, retry, optional Langfuse tracing
   mcp_bridge.py           # MCP client bridge to mcp_server/server.py
-  tools/                 # pipeline_health.py, data_query.py, governance_guard.py, anomaly_score.py, knowledge_search.py
+  databricks_client.py   # live-workspace REST client (SQL statements, Pipelines API); no-op unless DATABRICKS_* set
+  tools/                 # pipeline_health.py (+ pipeline_health_live.py), data_query.py, governance_guard.py, anomaly_score.py, knowledge_search.py
 mcp_server/server.py    # MCP server exposing agent/tools/* over stdio
 common/contracts.py     # single source of truth for the event schema — change the schema HERE first
 simulator/              # locally-runnable Kafka event + provider-roster generators
@@ -46,7 +47,7 @@ docs/                    # architecture.md (design rationale), flows/ (split-out
 
 ```bash
 uv sync --extra dev              # install runtime + dev dependencies (uv is the ONLY supported package manager here)
-uv run pytest                    # full test suite — 123 tests, ~110s, zero network calls, no ANTHROPIC_API_KEY needed
+uv run pytest                    # full test suite — 155 tests, ~110s, zero network calls, no ANTHROPIC_API_KEY needed
 uv run pytest tests/test_x.py    # one test file
 uv run ruff check .              # lint (select = E, F, I, UP; line-length 115; target-version py311)
 uv run python -m ml.train_anomaly_model   # retrain the anomaly model, overwrites ml/models/vitals_anomaly.onnx
@@ -63,9 +64,10 @@ that before considering a change done.
 - **No agent framework, no ORM, no heavy abstraction layers.** `agent/llm.py`'s `Claude` class is a plain dataclass-adjacent wrapper around the Anthropic SDK — mirrors the sibling `abhay` project's style deliberately. Do not introduce LangChain, an ORM, or a DI framework.
 - **Dependency injection over global state.** `Claude`, `MCPToolBridge`, `Tracer` are all constructor-injected into `OrchestratorAgent`, never constructed as module-level globals — this is what lets the test suite mock them with zero network calls. Follow this pattern for any new external dependency.
 - **`common/contracts.py` is the single source of truth for the event schema.** `pipeline/common/schemas.py` (PySpark), `simulator/domain.py` (dataclasses), and the Pydantic models in `contracts.py` itself all describe the same wire shape from different angles and cross-check against the constants there (`tests/test_contract_consistency.py`). If you change the schema, change it in `common/contracts.py` first.
-- **No-op-unless-configured pattern for every optional integration.** `agent/llm.py:Tracer` (Langfuse), `agent/otel.py` (OpenTelemetry), `agent/secrets.py:get_secret` (GCP Secret Manager) all follow the same shape: zero import, zero network call, and a documented fallback unless the relevant env var(s) are set. New optional integrations should follow this shape, not require configuration to avoid crashing.
+- **No-op-unless-configured pattern for every optional integration.** `agent/llm.py:Tracer` (Langfuse), `agent/otel.py` (OpenTelemetry), `agent/secrets.py:get_secret` (GCP Secret Manager), `agent/databricks_client.py:load_config` (live Databricks workspace) all follow the same shape: zero import, zero network call, and a documented fallback unless the relevant env var(s) are set. New optional integrations should follow this shape, not require configuration to avoid crashing.
 - **Guardrails are enforced in code, not just requested in a system prompt.** See `docs/architecture.md`'s Guardrails table. Any new tool or dispatch path must go through the same `_dispatch` pipeline (masking → injection scan → output-size cap → audit log) in `agent/orchestrator.py` — do not add a tool that bypasses it.
 - **`ToolResult(tool_use_id, content, is_error)` is the universal return shape** for every tool function, on both sides of the MCP boundary (`mcp_server/server.py:_to_call_tool_result` / `agent/mcp_bridge.py:MCPToolBridge.dispatch` round-trip it losslessly). New tools should return this shape, not raise for an expected failure.
+- **Live-workspace code is tested against a mocked `httpx` transport, never a real workspace.** `DatabricksClient` takes an injectable `transport`; `tests/conftest.py` clears every `DATABRICKS_*` env var before each test so a developer's shell can't turn the suite into real network calls. A passing test there proves request/response handling only — keep its status as Stubbed until it has run against a real workspace.
 - **Tests use a scripted fake `Claude`, never a real API call.** Any fake substituted for `Claude` must expose the same `run_tool_loop(system, messages, tools, dispatch, max_turns=6)` signature.
 - **Docstrings carry the "why," not just the "what."** Every non-trivial module in this repo opens with a docstring explaining the design decision, not just what the code does — match that density when adding new modules, especially around anything guardrail- or masking-related.
 - **Status honesty**: comments/docstrings in `pipeline/`, `governance/`, `infra/`, and `resources/` explicitly say "Databricks-only" / "not executed in this environment" / "never applied." Preserve that framing in any new file in those directories — do not imply platform code has been run when it hasn't.
