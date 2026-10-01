@@ -16,8 +16,13 @@ directly, so an unknown event_type fails the pipeline before any vitals are
 written.
 
 `plausible_vital_value` is a hard drop (expect_or_drop): a physically
-impossible reading (e.g. negative heart rate) is safe to quarantine silently,
-it doesn't indicate a broken upstream contract the way an unknown event_type
+impossible reading is safe to quarantine silently. "Impossible" is per vital
+(common.contracts.PHYSIOLOGIC_LIMITS): it excludes the 0 many devices send
+when disconnected, SpO2 above 100%, and Fahrenheit sent as temp_c, while
+keeping clinical alarms like a heart rate of 145. (It used to be a single
+`value BETWEEN 0 AND 300`, which let a disconnected sensor's 0 through as a
+real reading.) Dropping is right because an impossible reading doesn't
+indicate a broken upstream contract the way an unknown event_type
 does. `known_vital_item` is warn-only (expect) — an unrecognized itemid is
 worth surfacing in pipeline health metrics but not worth losing the row over.
 """
@@ -31,7 +36,7 @@ from pyspark.sql import SparkSession
 # added explicitly; resources/dlt_pipeline.yml sets bundle.sourcePath.
 sys.path.append(SparkSession.getActiveSession().conf.get("bundle.sourcePath", "."))
 
-from common.contracts import VITAL_ITEM_TYPES, VITALS_WATERMARK_MINUTES  # noqa: E402
+from common.contracts import VITAL_ITEM_TYPES, VITALS_WATERMARK_MINUTES, plausible_vital_sql  # noqa: E402
 
 _KNOWN_ITEMS_SQL = ", ".join(f"'{v}'" for v in VITAL_ITEM_TYPES)
 
@@ -42,7 +47,7 @@ _KNOWN_ITEMS_SQL = ", ".join(f"'{v}'" for v in VITAL_ITEM_TYPES)
 )
 # Expectations evaluate against this function's OUTPUT, which has the flattened
 # `value`/`itemid` columns below, not the Bronze `vital` struct.
-@dlt.expect_or_drop("plausible_vital_value", "value BETWEEN 0 AND 300")
+@dlt.expect_or_drop("plausible_vital_value", plausible_vital_sql())
 @dlt.expect("known_vital_item", f"itemid IN ({_KNOWN_ITEMS_SQL})")
 def silver_fct_vitals():
     events = dlt.read_stream("silver_contract_checked_events")

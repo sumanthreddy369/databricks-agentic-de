@@ -77,6 +77,24 @@ dlt.apply_changes(
     stored_as_scd_type=1,
 )
 
+# Same source, kept as history (SCD type 2): one row per version of each
+# encounter with __START_AT/__END_AT validity bounds. silver_fct_encounters
+# only knows where a patient is NOW; this table knows where they were at any
+# moment, which is what attributing a vitals reading to the unit it was taken
+# in (gold_live_vitals_by_unit) and "as of 3am" questions
+# (gold.fct_encounter_history) both need.
+dlt.create_streaming_table("silver_fct_encounter_history")
+
+dlt.apply_changes(
+    target="silver_fct_encounter_history",
+    source="encounters_cdc_view",
+    keys=["encounter_id"],
+    sequence_by="event_ts",
+    ignore_null_updates=True,
+    except_column_list=["event_type"],
+    stored_as_scd_type=2,
+)
+
 
 @dlt.view(name="patients_cdc_view")
 @dlt.expect_or_drop("valid_patient_id", "patient_id IS NOT NULL")

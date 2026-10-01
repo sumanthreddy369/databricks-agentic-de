@@ -73,6 +73,42 @@ VITAL_RANGES = {
     "dbp": (50, 100),
 }
 
+# Physically possible bounds per vital, used by Silver's `plausible_vital_value`
+# expect_or_drop. Deliberately much wider than VITAL_RANGES: a heart rate of
+# 145 is a clinical alarm that must reach Gold, not be dropped. What these
+# exclude is what can't be a real reading: 0 (the value many devices send
+# when disconnected), SpO2 above 100%, a temp_c of 98.6 (Fahrenheit sent as
+# Celsius). Illustrative engineering bounds, not clinical reference values.
+PHYSIOLOGIC_LIMITS = {
+    "heart_rate": (1, 350),
+    "spo2": (1, 100),
+    "resp_rate": (1, 100),
+    "temp_c": (25, 45),
+    "sbp": (20, 300),
+    "dbp": (10, 250),
+}
+
+
+def plausible_vital_sql(value_col: str = "value", item_col: str = "itemid") -> str:
+    """SQL boolean for Silver's `plausible_vital_value` expectation. A known
+    vital must fall inside its PHYSIOLOGIC_LIMITS; an unknown itemid passes
+    (it's flagged by the warn-only `known_vital_item` instead of being
+    dropped). Plain SQL so tests can evaluate the exact same expression in
+    DuckDB that DLT evaluates on Databricks."""
+    per_item = " OR ".join(
+        f"({item_col} = '{item}' AND {value_col} BETWEEN {low} AND {high})"
+        for item, (low, high) in PHYSIOLOGIC_LIMITS.items()
+    )
+    known = ", ".join(f"'{item}'" for item in PHYSIOLOGIC_LIMITS)
+    return f"({value_col} IS NOT NULL AND ({per_item} OR {item_col} NOT IN ({known})))"
+
+
+# Minimum group size an aggregate answer may report. Counts of 1-10 (and any
+# metric computed over fewer than this many rows) are suppressed so a result
+# can't single out a patient even with names masked - the same threshold as
+# CMS's cell-size suppression policy for released health data.
+MIN_CELL_SIZE = 11
+
 # --- Guardrail size limits -------------------------------------------------
 # Shared caps enforced by agent/orchestrator.py and agent/tools/governance_guard.py.
 # Defined here (not locally in either file) for the same reason as everything

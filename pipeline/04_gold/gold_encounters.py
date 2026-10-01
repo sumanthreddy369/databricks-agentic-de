@@ -18,6 +18,7 @@ import sys
 
 import dlt
 from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
 
 # DLT doesn't put the bundle root on sys.path, so project imports need it
 # added explicitly; resources/dlt_pipeline.yml sets bundle.sourcePath.
@@ -40,3 +41,23 @@ def dim_patients():
 )
 def fct_encounters():
     return dlt.read("silver_fct_encounters")
+
+
+@dlt.table(
+    name=f"{GOLD_SCHEMA}.fct_encounter_history",
+    comment=(
+        "Gold: every version of every encounter, valid from valid_from until valid_to (NULL = current). "
+        "Answers point-in-time questions such as the census of a unit at a given time."
+    ),
+)
+def fct_encounter_history():
+    return dlt.read("silver_fct_encounter_history").select(
+        "encounter_id",
+        "patient_id",
+        "encounter_type",
+        "unit",
+        "attending_provider_id",
+        "status",
+        F.col("__START_AT").alias("valid_from"),
+        F.col("__END_AT").alias("valid_to"),
+    )

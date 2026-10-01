@@ -30,3 +30,8 @@ RETURN
 
 ALTER TABLE healthcare_agentic_de.gold.fct_encounters
   SET ROW FILTER healthcare_agentic_de.gold.unit_row_filter ON (unit);
+
+-- fct_encounter_history carries the same `unit` column (one row per version
+-- of each encounter), so it gets the same unit-scoped row filter.
+ALTER TABLE healthcare_agentic_de.gold.fct_encounter_history
+  SET ROW FILTER healthcare_agentic_de.gold.unit_row_filter ON (unit);
