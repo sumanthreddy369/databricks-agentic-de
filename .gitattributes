@@ -1,0 +1,3 @@
+# Binary formats: never apply line-ending conversion (it corrupts PDF byte offsets).
+*.pdf binary
+*.onnx binary
