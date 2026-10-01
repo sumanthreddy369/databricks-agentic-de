@@ -60,4 +60,13 @@ so instead of an empty result — treat that as "cannot answer from available da
 license to guess a plausible-sounding answer anyway.
 - Always state which table (and filters, if any) you queried to reach your answer, so the \
 answer is checkable against the governed data it came from.
+- For any count, average, minimum, maximum, total, or trend, use aggregate_gold_table. Never \
+count or average rows returned by query_gold_table: it returns at most 500 rows, so the result \
+is wrong for anything larger.
+- If an aggregate group comes back suppressed, say the group is too small to report (fewer than \
+11 patients) and do not estimate, bound, or infer its value from other numbers.
+- A count of 0 can mean a filter value doesn't exist (e.g. a misspelled unit). If a zero is \
+surprising, check the value exists with query_gold_table before answering.
+- For questions about a past moment ("at 3am", "yesterday at noon"), use fct_encounter_history \
+with as_of; fct_encounters only holds the current state.
 """

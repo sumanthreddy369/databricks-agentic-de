@@ -96,7 +96,7 @@ def grid(rows, widths, header=True, status_col=None):
 
 # ---------------------------------------------------------------------------
 # Problem catalog. Each row: id, problem, who, detect, act, level, status.
-# Status is checked against the repo as of commit 154aee6.
+# Status is a manual snapshot of the repo, checked 2026-10-01.
 # ---------------------------------------------------------------------------
 LAYERS = [
     (
@@ -317,7 +317,7 @@ LAYERS = [
                 "Result counts below a minimum cell size.",
                 "Suppress or bucket small counts (e.g. &lt;11) and say why.",
                 "L3",
-                "To build",
+                "Exists - aggregate_gold_table suppresses groups under 11 patients; subtraction from totals is prompt-only",
             ),
             (
                 "C6",
@@ -426,7 +426,7 @@ LAYERS = [
                 "Range checks on inputs before scoring.",
                 "Reject the input with a clear error instead of scoring garbage.",
                 "L3",
-                "Partial - missing features rejected; units not checked",
+                "Partial - missing features rejected; Silver now drops F-as-C temps (M4)",
             ),
         ],
     ),
@@ -449,7 +449,7 @@ LAYERS = [
                 "Truncation flag from the row cap.",
                 "Use a governed aggregate tool (COUNT / AVG / GROUP BY computed in SQL), never count returned rows.",
                 "L3",
-                "To build - top priority gap in the current tool",
+                "Exists - aggregate_gold_table computes it in SQL (tested locally)",
             ),
             (
                 "F3",
@@ -503,7 +503,7 @@ LAYERS = [
                 "Temporal intent in the question.",
                 "Query gold_live_vitals_by_unit windows; describe trend with numbers.",
                 "L3",
-                "Partial - table exists; equality-filter tool can't order/limit by time",
+                "Partial - aggregate_gold_table groups by window/unit with time-range filters",
             ),
             (
                 "F9",
@@ -848,7 +848,7 @@ LAYERS = [
                 "Vitals with no matching encounter; readings near transfer times.",
                 "Point-in-time (as-of) join on event time; hold unmatched vitals for a grace period instead of dropping.",
                 "L1",
-                "Partial - gap exists in gold_live_vitals_by_unit today",
+                "Partial - fixed in pipeline code (event-time join, UNASSIGNED bucket); never run on Databricks",
             ),
             (
                 "L7",
@@ -866,7 +866,7 @@ LAYERS = [
                 "Question asks about a past point in time.",
                 "Say it can't answer from current-state tables; build SCD type 2 / snapshots. (silver_fct_encounters is SCD type 1 today.)",
                 "L3",
-                "To build",
+                "Partial - fct_encounter_history + as_of, tested on DuckDB; pipeline never run",
             ),
         ],
     ),
@@ -907,7 +907,7 @@ LAYERS = [
                 "Spikes of exact sentinel values per device.",
                 "Treat as missing, not as a reading; propose tightening the expectation.",
                 "L1",
-                "Partial - expectation exists but lets 0 through",
+                "Exists - per-vital physical limits; SQL tested in DuckDB, pipeline never run",
             ),
             (
                 "M5",
@@ -1118,7 +1118,7 @@ def build():
         )
     )
     s.append(Spacer(1, 8))
-    s.append(p("Project: databricks-agentic-de (status checked against commit 154aee6, 2026-10-01)", SMALL))
+    s.append(p("Project: databricks-agentic-de (status checked against the repo on 2026-10-01)", SMALL))
     s.append(Spacer(1, 10))
 
     counts = {"Exists": 0, "Partial": 0, "To build": 0}
@@ -1138,12 +1138,12 @@ def build():
                 "escalation ceiling, groundedness refusal, graceful degradation).",
                 f"<b>{counts['Partial']} partially handled</b> - the tool exists but detection or live data is missing.",
                 f"<b>{counts['To build']} still to build.</b> Most need new read-only tools plus scenarios to train against.",
-                "<b>Biggest DA gap:</b> the query tool returns raw rows capped at 500, so counts and averages on large tables are wrong (F2). "
-                "A governed aggregate tool comes first.",
+                "<b>Fixed since the first edition:</b> counts and averages computed in SQL instead of from capped rows, with small-cell "
+                "suppression (F2, C5); point-in-time encounter history with as_of (L8); per-vital physical limits so a disconnected "
+                "sensor's 0 is dropped (M4); vitals attributed to the unit at reading time (L6, pipeline code, not yet run on Databricks).",
                 "<b>Biggest DE gap:</b> the agent can see job status and expectation counts, but not stream lag, freshness, or reconciliation (A1, B7, B8).",
-                "<b>Most dangerous silent failures:</b> a source that stops sending while every job stays green (K2); monitoring that fails and gets "
-                "read as healthy (K5); a heart rate of 0 passing the plausibility check (M4); vitals attributed to the wrong unit or dropped "
-                "around admissions and transfers (L6).",
+                "<b>Most dangerous silent failures still open:</b> a source that stops sending while every job stays green (K2); monitoring "
+                "that fails and gets read as healthy (K5).",
                 "Nothing marked <i>Exists</i> has run against a live Databricks workspace yet; live paths are tested against mocked APIs only.",
             ]
         )
@@ -1377,7 +1377,7 @@ def build():
         [
             "5. Eval runs",
             "Mocked runs in CI on every push (fast, free). A nightly run with the real Claude model over the full library, scored and tracked over time.",
-            "CI runs the mocked suite (162 tests). No real-model eval harness yet.",
+            "CI runs the mocked suite (196 tests). No real-model eval harness yet.",
             "Pass rate per problem tracked; a regression blocks merging.",
         ],
         [
@@ -1427,9 +1427,10 @@ def build():
         bullets(
             [
                 "<b>Question:</b> 'How many patients are currently in the ICU?' with 2,000 active ICU encounters.",
-                "<b>Today:</b> query_gold_table returns 500 rows (cap); the model can only count what it sees - wrong answer.",
-                "<b>Target:</b> a governed aggregate tool runs COUNT(*) with status = 'in-progress' AND unit = 'ICU' in SQL and returns one number, "
-                "plus the data-as-of timestamp (F4). Small-cell suppression (C5) applies to any count under the threshold.",
+                "<b>Before:</b> query_gold_table returns 500 rows (cap); the model could only count what it saw - wrong answer.",
+                "<b>Now:</b> aggregate_gold_table runs COUNT(*) with status = 'in-progress' AND unit = 'ICU' in SQL and returns one number; "
+                "groups under 11 patients come back suppressed (C5). tests/test_aggregate_tool.py proves 600 is counted exactly past the cap.",
+                "<b>Still to add:</b> the data-as-of timestamp in every answer (F4).",
                 "<b>Grader:</b> exact match against the seeded count; answer states the table, filters, and freshness.",
             ]
         )
@@ -1443,8 +1444,9 @@ def build():
                 ["Priority", "Build", "Why first", "Problems unlocked"],
                 [
                     "1",
-                    "Governed aggregate query tool (COUNT/SUM/AVG/GROUP BY, time windows, UTC-to-local) with small-cell suppression",
-                    "Current DA answers can be wrong at scale",
+                    "DONE: aggregate_gold_table (COUNT/SUM/AVG/GROUP BY, range filters, as_of) with small-cell suppression. "
+                    "Remaining: UTC-to-local shifts (L4), freshness in answers (F4)",
+                    "DA answers were wrong at scale",
                     "F2, F3, F8, C5, F4, L4",
                 ],
                 [

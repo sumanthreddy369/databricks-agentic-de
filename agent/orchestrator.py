@@ -137,6 +137,40 @@ DA_TOOLS = [
             "required": ["table"],
         },
     },
+    {
+        "name": "aggregate_gold_table",
+        "description": (
+            "Compute count, count_distinct, avg, min, max, or sum over a governed Gold table in SQL, optionally "
+            "filtered and grouped (up to 3 group_by columns). Use this for every how-many / average / trend "
+            "question: query_gold_table returns at most 500 rows, so counting its rows gives wrong answers. "
+            "Groups covering fewer than 11 patients come back suppressed (value null). as_of (ISO timestamp) "
+            "only applies to fct_encounter_history and selects the encounter versions in effect at that moment."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "table": {"type": "string"},
+                "metric": {"type": "string", "enum": ["count", "count_distinct", "avg", "min", "max", "sum"]},
+                "column": {"type": "string"},
+                "filters": {"type": "object"},
+                "where": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "column": {"type": "string"},
+                            "op": {"type": "string", "enum": ["=", "!=", "<", "<=", ">", ">="]},
+                            "value": {},
+                        },
+                        "required": ["column", "op", "value"],
+                    },
+                },
+                "group_by": {"type": "array", "items": {"type": "string"}},
+                "as_of": {"type": "string"},
+            },
+            "required": ["table", "metric"],
+        },
+    },
 ]
 
 ORCHESTRATOR_ROLE = "orchestrator_agent"
@@ -313,6 +347,8 @@ class OrchestratorAgent:
 
         if tool_name == "query_gold_table":
             result = self._dispatch_query_gold_table(tool_input)
+        elif tool_name == "aggregate_gold_table":
+            result = self._dispatch_aggregate_gold_table(tool_input)
         elif tool_name in _REMEDIATION_TOOLS:
             # Blast-radius note: these are the ONLY two tools anywhere in
             # this codebase that mutate pipeline/job state (see
@@ -385,6 +421,28 @@ class OrchestratorAgent:
             masked_rows = masked_rows[:MAX_TOOL_RESULT_ROWS]
 
         return ToolResult(tool_use_id="", content=json.dumps(masked_rows, default=str))
+
+    def _dispatch_aggregate_gold_table(self, tool_input: dict) -> ToolResult:
+        """Same in-process path as `_dispatch_query_gold_table`, for the same
+        reason. aggregate_gold_table already refuses masked columns as the
+        metric, a filter, or a group key, so its rows can't carry PHI; masking
+        still runs on them so that guarantee never rests on one check alone.
+        A zero count is a real answer here (unlike an empty row list), so
+        there is no groundedness refusal on this path."""
+        kwargs = {}
+        if self.duckdb_path is not None:
+            kwargs["db_path"] = self.duckdb_path
+        if self.seed_sql_path is not None:
+            kwargs["seed_sql_path"] = self.seed_sql_path
+        optional = ("column", "filters", "where", "group_by", "as_of")
+        args = {key: tool_input[key] for key in optional if key in tool_input}
+        table = tool_input.get("table", "")
+        result = data_query.aggregate_gold_table(table, tool_input.get("metric", ""), **args, **kwargs)
+        if result.is_error:
+            return result
+        payload = json.loads(result.content)
+        payload["rows"] = governance_guard.enforce_masking(table, payload["rows"], role=ORCHESTRATOR_ROLE)
+        return ToolResult(tool_use_id="", content=json.dumps(payload, default=str))
 
     def _dispatch_pipeline_health(self, tool_name: str, tool_input: dict) -> ToolResult:
         """Handles the read-only health checks and notify_and_page — the

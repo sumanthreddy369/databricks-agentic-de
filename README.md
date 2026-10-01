@@ -67,7 +67,7 @@ databricks-agentic-de/
 │   └── tools/
 │       ├── pipeline_health.py      # DE tools: check_expectation_metrics, quarantine, restart, notify_and_page
 │       ├── pipeline_health_live.py # live-workspace backend for the DE tools (Pipelines API)
-│       ├── data_query.py           # DA tool: query_gold_table (DuckDB locally, SQL warehouse when configured)
+│       ├── data_query.py           # DA tools: query_gold_table + aggregate_gold_table (DuckDB locally, SQL warehouse when configured)
 │       ├── governance_guard.py     # enforce_masking + scan_for_injection guardrails
 │       ├── anomaly_score.py        # score_vitals_anomaly: ONNX inference
 │       └── knowledge_search.py     # Databricks Vector Search tool (Stubbed, degrades cleanly)
@@ -113,7 +113,7 @@ databricks-agentic-de/
 │   ├── comparisons/                # Genie / Agent Bricks / Vertex AI evaluation plans (Target, not built yet)
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
-├── tests/                          # mocked Anthropic client, zero network calls, 162 tests
+├── tests/                          # mocked Anthropic client, zero network calls, 196 tests
 ├── .github/workflows/              # ci.yml (lint+test), bundle-validate.yml (Databricks-gated)
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
@@ -196,15 +196,25 @@ view reads Bronze unfiltered and is the only Silver dataset that reads Bronze
 at all, so no consumer can filter an unknown type away before the check sees
 it (`tests/test_dlt_pipeline_graph.py` asserts both). By
 contrast, `plausible_vital_value` in `silver_vitals.py` is `expect_or_drop`
-(a physically impossible vital, e.g. negative heart rate, is safe to drop
-silently) and `known_vital_item` is warn-only `expect` (an unrecognized
-`itemid` is worth surfacing, not worth losing the row over).
+(a physically impossible vital is safe to drop silently) and
+`known_vital_item` is warn-only `expect` (an unrecognized `itemid` is worth
+surfacing, not worth losing the row over). "Physically impossible" is per
+vital (`common.contracts.PHYSIOLOGIC_LIMITS`): it drops the 0 a disconnected
+device sends, SpO2 above 100%, and Fahrenheit sent as `temp_c`, and keeps
+clinical alarms like a heart rate of 145. The expression is evaluated in
+DuckDB by `tests/test_plausible_vital_expectation.py`.
 
 **Gold's `gold_live_vitals_by_unit` is a genuine streaming aggregate** — avg
 heart rate and an out-of-range count, windowed over a trailing 15 minutes and
 grouped by unit — advancing continuously as new vitals arrive, not a batch
-job. The rest of Gold is a thin passthrough that gives BI/agent consumers a
-stable, documented table name.
+job. Each reading counts toward the unit the patient was in *when it was
+taken*: an event-time range join against `silver_fct_encounter_history`
+(SCD type 2), not the current-state table, so a transfer doesn't move earlier
+readings to the new unit. Readings that arrive before their admit event land
+in an `UNASSIGNED` unit instead of being dropped. The same history is
+published as `gold.fct_encounter_history` for point-in-time questions ("ICU
+census at 3am"). The rest of Gold is a thin passthrough that gives BI/agent
+consumers a stable, documented table name.
 
 **Gold lives in its own schema.** Both pipelines use DLT's default publishing
 mode (`schema: silver` in `resources/dlt_pipeline.yml`), and every
@@ -342,6 +352,20 @@ the name by whether any row came back. Filter keys must be plain identifiers
 and values are always bound parameters, on the DuckDB and live-warehouse
 backends alike (`tests/test_data_query_live.py`).
 
+**Counts and averages are computed in SQL, not by the model.**
+`query_gold_table` returns at most 500 rows, so "how many ICU patients?"
+answered by counting returned rows is wrong past 500. `aggregate_gold_table`
+runs COUNT / COUNT DISTINCT / AVG / MIN / MAX / SUM with optional
+`group_by`, range filters (`where`), and `as_of` for
+`fct_encounter_history`, on the same backends with the same column checks
+(no masked column as a metric, filter, or group key). **Small-cell
+suppression:** a group covering fewer than 11 distinct patients
+(`MIN_CELL_SIZE`) comes back with no value and no size, so a count or an
+average can't single someone out. A known limit: suppression is per query,
+so a suppressed value could still be derived by subtracting other groups from
+a total; that's forbidden by the DA prompt, not prevented in code
+(`tests/test_aggregate_tool.py`).
+
 **A zero-row result is a refusal, not empty data.** An empty
 `query_gold_table` result is short-circuited to a fixed
 `GROUNDEDNESS_REFUSAL` string instead of flowing to the model as ordinary
@@ -385,7 +409,7 @@ call) and re-proves masking and audit-trail guarantees hold MCP-routed.**
 flowchart TD
     A["OrchestratorAgent._dispatch"] --> B{"tool type"}
     B -->|"DE tool: health check, quarantine,\nrestart, notify, score_vitals_anomaly"| C["MCPToolBridge.dispatch\ntool_name, tool_input"]
-    B -->|"DA tool: query_gold_table"| D["data_query.query_gold_table\ndirect in-process, no MCP hop"]
+    B -->|"DA tools: query_gold_table, aggregate_gold_table"| D["data_query.*\ndirect in-process, no MCP hop"]
     C --> E["_ensure_started\nlazy subprocess + session startup"]
     E --> F["stdio_client\nspawn: python -m mcp_server.server"]
     F --> G["ClientSession.call_tool\nover stdio"]
@@ -515,7 +539,7 @@ flowchart LR
 **Two independent workflows, deliberately.** `ci.yml` (lint + test) always
 runs to completion with no external dependency — `uv sync --extra dev` pulls
 the `dev` optional-dependency group (`ruff`, `pytest`) from `pyproject.toml`,
-and the full 162-test suite makes zero network calls (mocked Anthropic
+and the full 196-test suite makes zero network calls (mocked Anthropic
 client throughout). `bundle-validate.yml` checks for
 `DATABRICKS_HOST`/`DATABRICKS_TOKEN` repo secrets **before** installing the
 Databricks CLI or running `databricks bundle validate`, and exits 0 with a
@@ -610,7 +634,7 @@ suite mocks this) and other optional configuration.
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
 | `uv run orchestrator_healthcheck` | One scheduled-style DE-mode health check (needs `ANTHROPIC_API_KEY`); exit 0 healthy, 1 agent unavailable, 2 escalated |
-| `uv run pytest` | Run the full test suite (162 tests, zero network calls) |
+| `uv run pytest` | Run the full test suite (196 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
 | `databricks bundle validate` | Validate the Asset Bundle against a real workspace (Databricks-only) |
@@ -722,7 +746,7 @@ live infrastructure, or pure planning with no implementation at all
 ## Testing
 
 ```bash
-uv run pytest            # full suite: 162 tests, ~110s, zero network calls
+uv run pytest            # full suite: 196 tests, ~110s, zero network calls
 uv run pytest -q         # quiet output
 uv run pytest tests/test_masking_guard.py tests/test_prompt_injection_guard.py  # the two core guardrail proofs
 uv run ruff check .      # lint

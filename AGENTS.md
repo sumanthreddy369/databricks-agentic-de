@@ -47,7 +47,7 @@ docs/                    # architecture.md (design rationale), flows/ (split-out
 
 ```bash
 uv sync --extra dev              # install runtime + dev dependencies (uv is the ONLY supported package manager here)
-uv run pytest                    # full test suite — 162 tests, ~110s, zero network calls, no ANTHROPIC_API_KEY needed
+uv run pytest                    # full test suite — 196 tests, ~110s, zero network calls, no ANTHROPIC_API_KEY needed
 uv run pytest tests/test_x.py    # one test file
 uv run ruff check .              # lint (select = E, F, I, UP; line-length 115; target-version py311)
 uv run python -m ml.train_anomaly_model   # retrain the anomaly model, overwrites ml/models/vitals_anomaly.onnx
