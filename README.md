@@ -763,6 +763,7 @@ citation, and the swap-in path if you want to build against it directly.
 
 - [`docs/architecture.md`](docs/architecture.md) — full design rationale for every flow above, plus the complete guardrail table with implementing-file/test pointers.
 - [`docs/flows/guardrails.md`](docs/flows/guardrails.md) — escalation ceiling, kill switch, audit trail, and behavioral anomaly detection in detail.
+- [`docs/agent_problem_catalog.pdf`](docs/agent_problem_catalog.pdf) — 89 real-time DE/DA problems on this Databricks stack (pipelines, governance, overload, outages, timestamps, data content), how the agent should handle each, its repo status, and the agent training/eval plan. Rebuild with `uv run --no-project --with reportlab python scripts/build_problem_catalog.py`.
 - [`docs/comparisons/`](docs/comparisons/) — Genie, Agent Bricks, and Vertex AI evaluation plans (pending a live workspace).
 - [`docs/restructure-proposal.md`](docs/restructure-proposal.md) — optional layout suggestions surfaced while writing this documentation; not applied.
 - [`AGENTS.md`](AGENTS.md) — instructions for AI coding agents working in this repo.
