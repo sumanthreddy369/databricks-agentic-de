@@ -113,7 +113,7 @@ databricks-agentic-de/
 │   ├── comparisons/                # Genie / Agent Bricks / Vertex AI evaluation plans (Target, not built yet)
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
-├── tests/                          # mocked Anthropic client, zero network calls, 274 tests
+├── tests/                          # mocked Anthropic client, zero network calls, 290 tests
 ├── .github/workflows/              # ci.yml (lint+test), bundle-validate.yml (Databricks-gated)
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
@@ -539,7 +539,7 @@ flowchart LR
 **Two independent workflows, deliberately.** `ci.yml` (lint + test) always
 runs to completion with no external dependency — `uv sync --extra dev` pulls
 the `dev` optional-dependency group (`ruff`, `pytest`) from `pyproject.toml`,
-and the full 274-test suite makes zero network calls (mocked Anthropic
+and the full 290-test suite makes zero network calls (mocked Anthropic
 client throughout). `bundle-validate.yml` checks for
 `DATABRICKS_HOST`/`DATABRICKS_TOKEN` repo secrets **before** installing the
 Databricks CLI or running `databricks bundle validate`, and exits 0 with a
@@ -634,7 +634,7 @@ suite mocks this) and other optional configuration.
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
 | `uv run orchestrator_healthcheck` | One scheduled-style DE-mode health check (needs `ANTHROPIC_API_KEY`); exit 0 healthy, 1 agent unavailable, 2 escalated |
-| `uv run pytest` | Run the full test suite (274 tests, zero network calls) |
+| `uv run pytest` | Run the full test suite (290 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
 | `databricks bundle validate` | Validate the Asset Bundle against a real workspace (Databricks-only) |
@@ -725,6 +725,7 @@ live infrastructure, or pure planning with no implementation at all
 | Rate limiting (`simulator/producer.py:RateLimiter`) | Complete |
 | Graceful degradation on Claude API failure | Complete |
 | ONNX joint anomaly-scoring model + training pipeline (`ml/`) | Complete |
+| Genie glue + guardrails (`agent/tools/genie.py`: `ask_genie` routes DA questions to a Genie space; PHI-request refusal, SQL schema check, masking backstop incl. leaked values in Genie's text, small-count suppression) | Stubbed - tested against a mocked Genie Conversation API only; no Genie space exists yet. Falls back to the agent's own tools when unconfigured |
 | DuckDB-backed local Gold stand-in (`agent/tools/data_query.py`) | Complete |
 | Live-workspace DA queries — SQL Statement Execution API against `healthcare_agentic_de.gold` (`agent/databricks_client.py`, `data_query.py`) | Stubbed — request/response handling tested against a mocked transport only; never run against a real warehouse. No-op unless `DATABRICKS_HOST`/`DATABRICKS_TOKEN`/`DATABRICKS_WAREHOUSE_ID` are set |
 | Live-workspace DE tools — expectation metrics, pipeline status, restart via the Pipelines API (`agent/tools/pipeline_health_live.py`) | Stubbed — tested against a mocked transport only; never run against a real workspace. `detect_schema_drift`/`quarantine_bad_records` have no live equivalent and return an escalate-instead error; `notify_and_page` has no paging integration yet |
@@ -749,7 +750,7 @@ live infrastructure, or pure planning with no implementation at all
 ## Testing
 
 ```bash
-uv run pytest            # full suite: 274 tests, ~110s, zero network calls
+uv run pytest            # full suite: 290 tests, ~110s, zero network calls
 uv run pytest -q         # quiet output
 uv run pytest tests/test_masking_guard.py tests/test_prompt_injection_guard.py  # the two core guardrail proofs
 uv run ruff check .      # lint

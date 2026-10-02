@@ -47,7 +47,7 @@ docs/                    # architecture.md (design rationale), flows/ (split-out
 
 ```bash
 uv sync --extra dev              # install runtime + dev dependencies (uv is the ONLY supported package manager here)
-uv run pytest                    # full test suite — 274 tests, ~110s, zero network calls, no ANTHROPIC_API_KEY needed
+uv run pytest                    # full test suite — 290 tests, ~110s, zero network calls, no ANTHROPIC_API_KEY needed
 uv run pytest tests/test_x.py    # one test file
 uv run ruff check .              # lint
 uv run python -m evals.run       # scenario evals against the REAL model - spends API tokens, needs credentials (select = E, F, I, UP; line-length 115; target-version py311)

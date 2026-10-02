@@ -19,7 +19,7 @@ EXPECTED_DE_TOOL_NAMES = {
     "lookup_problem",
 }
 
-EXPECTED_DA_TOOL_NAMES = {"query_gold_table", "aggregate_gold_table", "lookup_problem"}
+EXPECTED_DA_TOOL_NAMES = {"ask_genie", "query_gold_table", "aggregate_gold_table", "lookup_problem"}
 
 _DESTRUCTIVE_NAME_PATTERN = re.compile(r"drop|delete|truncate|purge|wipe|erase", re.IGNORECASE)
 

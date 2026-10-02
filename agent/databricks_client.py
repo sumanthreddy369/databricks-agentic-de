@@ -27,6 +27,7 @@ pattern the rest of `agent/` uses.
 
 import json
 import os
+import time
 from dataclasses import dataclass, field
 
 import httpx
@@ -42,6 +43,10 @@ DEFAULT_TIMEOUT_SECONDS = 60.0
 # before the call returns; `on_wait_timeout=CANCEL` means a slow query is
 # cancelled rather than left running with no one polling for it.
 STATEMENT_WAIT_TIMEOUT = "30s"
+
+GENIE_TIMEOUT_SECONDS = 60.0
+GENIE_POLL_SECONDS = 2.0
+GENIE_FAILED_STATUSES = {"FAILED", "CANCELLED", "QUERY_RESULT_EXPIRED"}
 
 # JSON_ARRAY results come back as strings; these Databricks SQL type names
 # are converted back to Python numbers/bools so the agent sees the same
@@ -66,6 +71,8 @@ class DatabricksConfig:
     # than a lookup by name, because a development-mode bundle deploy
     # prefixes the deployed name with "[dev <user>]".
     pipeline_ids: dict[str, str] = field(default_factory=dict)
+    # Genie space the glue layer sends analyst questions to (agent/tools/genie.py).
+    genie_space_id: str | None = None
 
 
 def load_config() -> DatabricksConfig | None:
@@ -73,7 +80,8 @@ def load_config() -> DatabricksConfig | None:
 
     Reads `DATABRICKS_HOST`, `DATABRICKS_TOKEN` (via Secret Manager when
     available), `DATABRICKS_WAREHOUSE_ID` (DA-mode queries) and
-    `DATABRICKS_PIPELINE_IDS` (DE-mode, a JSON object of name -> ID).
+    `DATABRICKS_PIPELINE_IDS` (DE-mode, a JSON object of name -> ID), and
+    `GENIE_SPACE_ID` (the Genie space DA-mode questions are routed to).
     """
     host = os.environ.get("DATABRICKS_HOST")
     if not host:
@@ -99,6 +107,7 @@ def load_config() -> DatabricksConfig | None:
         token=token,
         warehouse_id=os.environ.get("DATABRICKS_WAREHOUSE_ID") or None,
         pipeline_ids=pipeline_ids,
+        genie_space_id=os.environ.get("GENIE_SPACE_ID") or None,
     )
 
 
@@ -152,15 +161,73 @@ class DatabricksClient:
             message = status.get("error", {}).get("message", "no error message")
             raise DatabricksError(f"statement {status.get('state', 'UNKNOWN')}: {message}")
 
-        columns = payload.get("manifest", {}).get("schema", {}).get("columns", [])
-        data = (payload.get("result") or {}).get("data_array") or []
-        return [
-            {
-                col["name"]: _convert(value, col.get("type_name", "STRING"))
-                for col, value in zip(columns, row, strict=True)
-            }
-            for row in data
-        ]
+        return _rows(payload)
+
+    # --- Genie Conversation API ----------------------------------------------
+    #
+    # Shapes follow the documented Genie Conversation API: start a
+    # conversation with a question, poll the message until it completes, then
+    # fetch the query result of any attachment that carries SQL. Never called
+    # against a real Genie space in this environment.
+
+    def genie_ask(
+        self,
+        question: str,
+        *,
+        timeout_s: float = GENIE_TIMEOUT_SECONDS,
+        poll_s: float = GENIE_POLL_SECONDS,
+        sleep=time.sleep,
+    ) -> dict:
+        """Asks the configured Genie space one question. Returns
+        {"conversation_id", "message_id", "text", "sql", "rows"} - rows is
+        None when Genie answered without running a query."""
+        space = self.config.genie_space_id
+        if not space:
+            raise DatabricksError("GENIE_SPACE_ID is not set")
+        started = self._request(
+            "POST", f"/api/2.0/genie/spaces/{space}/start-conversation", json={"content": question}
+        )
+        conversation_id = started.get("conversation_id") or started.get("conversation", {}).get("id")
+        message_id = started.get("message_id") or started.get("message", {}).get("id")
+        if not conversation_id or not message_id:
+            raise DatabricksError("Genie did not return a conversation and message id")
+
+        base = f"/api/2.0/genie/spaces/{space}/conversations/{conversation_id}/messages/{message_id}"
+        waited = 0.0
+        while True:
+            message = self._request("GET", base)
+            status = message.get("status", "")
+            if status == "COMPLETED":
+                break
+            if status in GENIE_FAILED_STATUSES:
+                error = (message.get("error") or {}).get("error") or status
+                raise DatabricksError(f"Genie message {status}: {error}")
+            if waited >= timeout_s:
+                raise DatabricksError(
+                    f"Genie did not answer within {timeout_s:.0f}s (last status {status or 'unknown'})"
+                )
+            sleep(poll_s)
+            waited += poll_s
+
+        text_parts, sql, rows = [], None, None
+        for attachment in message.get("attachments") or []:
+            if attachment.get("text"):
+                text_parts.append(attachment["text"].get("content", ""))
+            if attachment.get("query"):
+                query = attachment["query"]
+                sql = query.get("query")
+                if query.get("description"):
+                    text_parts.append(query["description"])
+                attachment_id = attachment.get("attachment_id") or attachment.get("id")
+                result = self._request("GET", f"{base}/attachments/{attachment_id}/query-result")
+                rows = _rows(result.get("statement_response") or result)
+        return {
+            "conversation_id": conversation_id,
+            "message_id": message_id,
+            "text": "\n".join(t for t in text_parts if t),
+            "sql": sql,
+            "rows": rows,
+        }
 
     # --- Pipelines API --------------------------------------------------------
 
@@ -183,6 +250,20 @@ class DatabricksClient:
         kind of destructive action no tool in this project may take (see
         AGENTS.md and tests/test_tool_allowlist.py)."""
         return self._request("POST", f"/api/2.0/pipelines/{pipeline_id}/updates", json={"full_refresh": False})
+
+
+def _rows(payload: dict) -> list[dict]:
+    """Rows from a SQL statement response (JSON_ARRAY format), typed by the
+    manifest. Shared by execute_statement and Genie query results."""
+    columns = payload.get("manifest", {}).get("schema", {}).get("columns", [])
+    data = (payload.get("result") or {}).get("data_array") or []
+    return [
+        {
+            col["name"]: _convert(value, col.get("type_name", "STRING"))
+            for col, value in zip(columns, row, strict=True)
+        }
+        for row in data
+    ]
 
 
 def _convert(value, type_name: str):

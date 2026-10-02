@@ -62,7 +62,7 @@ from agent.llm import Claude, ToolResult
 from agent.mcp_bridge import MCPToolBridge, get_default_bridge
 from agent.prompts import MODE_ROUTER_PROMPT, SYSTEM_PROMPT_DA, SYSTEM_PROMPT_DE
 from agent.state import OrchestratorResult
-from agent.tools import data_query, governance_guard, pipeline_health
+from agent.tools import data_query, genie, governance_guard, pipeline_health
 from common.contracts import MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_ROWS
 
 logger = structlog.get_logger(__name__)
@@ -143,6 +143,20 @@ DE_TOOLS = [
 ]
 
 DA_TOOLS = [
+    {
+        "name": "ask_genie",
+        "description": (
+            "Ask the platform's Genie space a clinical or operational question in plain English. Genie writes and "
+            "runs the SQL over governed Gold tables; this layer then checks its SQL, masks PHI, and suppresses "
+            "small groups before you see the result. Use this first. If it reports configured: false, answer with "
+            "aggregate_gold_table / query_gold_table instead."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"question": {"type": "string"}},
+            "required": ["question"],
+        },
+    },
     {
         "name": "query_gold_table",
         "description": "Query a governed Gold table. Rows are masked per platform policy before you see them.",
@@ -379,6 +393,10 @@ class OrchestratorAgent:
             result = self._dispatch_query_gold_table(tool_input)
         elif tool_name == "aggregate_gold_table":
             result = self._dispatch_aggregate_gold_table(tool_input)
+        elif tool_name == "ask_genie":
+            # In-process, like the other DA tools: Genie's raw rows go straight
+            # into ask_genie's own masking backstop before a ToolResult exists.
+            result = genie.ask_genie(tool_input.get("question", ""))
         elif tool_name in _REMEDIATION_TOOLS:
             # Blast-radius note: these are the ONLY two tools anywhere in
             # this codebase that mutate pipeline/job state (see
