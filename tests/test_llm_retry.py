@@ -169,3 +169,33 @@ def test_run_tool_loop_invokes_injected_tracer_per_turn_and_tool(monkeypatch):
     assert answer == "done"
     assert spy.turns == [0, 1]
     assert spy.tools == [(0, "some_tool")]
+
+
+# --- stop reasons that are not answers ----------------------------------
+
+
+class _FakeStoppedResponse:
+    def __init__(self, stop_reason: str, text: str = "") -> None:
+        self.content = [_FakeTextBlock(text)] if text else []
+        self.stop_reason = stop_reason
+        self.usage = _FakeUsage()
+
+
+def test_refusal_is_reported_as_no_answer(monkeypatch):
+    from agent.llm import REFUSAL_ANSWER
+
+    claude = Claude(api_key="test-key-never-sent")
+    monkeypatch.setattr(claude._client.messages, "create", lambda **kwargs: _FakeStoppedResponse("refusal"))
+
+    assert claude.run_tool_loop(system="s", messages=[], tools=[], dispatch=lambda n, i: None) == REFUSAL_ANSWER
+
+
+def test_truncated_response_is_not_returned_as_an_answer(monkeypatch):
+    from agent.llm import TRUNCATED_ANSWER
+
+    claude = Claude(api_key="test-key-never-sent")
+    monkeypatch.setattr(
+        claude._client.messages, "create", lambda **kwargs: _FakeStoppedResponse("max_tokens", "Pipeline is")
+    )
+
+    assert claude.run_tool_loop(system="s", messages=[], tools=[], dispatch=lambda n, i: None) == TRUNCATED_ANSWER

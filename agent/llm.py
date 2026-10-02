@@ -32,6 +32,9 @@ import anthropic
 import tenacity
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
+MAX_TOKENS = 16000
+REFUSAL_ANSWER = "The model declined this request; no answer was produced."
+TRUNCATED_ANSWER = "The model's response was cut off before it finished; no answer was produced."
 
 # Retry only failures shaped like "the network/service hiccuped, try again" —
 # never a blanket `except Exception`, which would also retry e.g. a 400 bad
@@ -131,7 +134,10 @@ class Claude:
     def _create_message(self, *, system: str, messages: list[dict], tools: list[dict]):
         return self._client.messages.create(
             model=self.model,
-            max_tokens=1024,
+            # Current models think by default, and thinking counts toward
+            # max_tokens; 1024 could cut a turn off mid-thought. 16000 keeps a
+            # non-streaming call well inside SDK timeouts.
+            max_tokens=MAX_TOKENS,
             system=system,
             messages=messages,
             tools=tools,
@@ -167,6 +173,14 @@ class Claude:
             self.tracer.trace_turn(turn, latency_s=latency_s, usage=usage)
 
             messages.append({"role": "assistant", "content": response.content})
+            if response.stop_reason == "refusal":
+                # A declined request is not an answer; say so plainly rather
+                # than returning whatever (often empty) text came back.
+                return REFUSAL_ANSWER
+            if response.stop_reason == "max_tokens":
+                # Cut off mid-response: returning the partial text as if it
+                # were a finished answer would read as a real conclusion.
+                return TRUNCATED_ANSWER
             if response.stop_reason != "tool_use":
                 return "".join(b.text for b in response.content if b.type == "text")
             tool_results = []
