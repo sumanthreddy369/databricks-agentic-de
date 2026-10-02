@@ -66,6 +66,22 @@ from common.contracts import MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_ROWS
 
 logger = structlog.get_logger(__name__)
 
+# Offered in both modes: matches what the agent observed against the
+# real-time problem catalog (agent/knowledge/problem_catalog.yaml) and returns
+# the expected response and autonomy level. Read-only, no data access.
+LOOKUP_PROBLEM_TOOL = {
+    "name": "lookup_problem",
+    "description": (
+        "Match what you observed (e.g. 'no events for 20 minutes but jobs are green', 'heart rate 0 readings') "
+        "or a problem ID (e.g. 'K2') against the catalog of real-time data problems on this platform. Returns "
+        "each match's ID, expected response, and the autonomy level that limits what you may do about it."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {"query": {"type": "string"}, "problem_id": {"type": "string"}},
+    },
+}
+
 DE_TOOLS = [
     {
         "name": "check_expectation_metrics",
@@ -122,6 +138,7 @@ DE_TOOLS = [
             "required": ["vitals"],
         },
     },
+    LOOKUP_PROBLEM_TOOL,
 ]
 
 DA_TOOLS = [
@@ -171,6 +188,7 @@ DA_TOOLS = [
             "required": ["table", "metric"],
         },
     },
+    LOOKUP_PROBLEM_TOOL,
 ]
 
 ORCHESTRATOR_ROLE = "orchestrator_agent"
@@ -359,8 +377,8 @@ class OrchestratorAgent:
                 if tool_name == "quarantine_bad_records"
                 else self._dispatch_restart(tool_input)
             )
-        elif tool_name == "score_vitals_anomaly":
-            result = self.mcp_bridge.dispatch("score_vitals_anomaly", tool_input)
+        elif tool_name in ("score_vitals_anomaly", "lookup_problem"):
+            result = self.mcp_bridge.dispatch(tool_name, tool_input)
         elif hasattr(pipeline_health, tool_name):
             result = self._dispatch_pipeline_health(tool_name, tool_input)
         else:

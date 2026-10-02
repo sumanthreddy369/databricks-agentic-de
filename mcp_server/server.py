@@ -28,7 +28,7 @@ from mcp.types import CallToolResult, TextContent
 
 from agent.llm import ToolResult
 from agent.tools import anomaly_score as anomaly_score_module
-from agent.tools import data_query, pipeline_health
+from agent.tools import data_query, pipeline_health, problem_catalog
 
 mcp_app = MCPServer(
     name="databricks-agentic-de-tools",
@@ -113,6 +113,14 @@ def _score_vitals_anomaly_tool(vitals: dict):
     sbp, dbp) for JOINT anomaly risk via the local ONNX IsolationForest
     model trained by ml/train_anomaly_model.py."""
     return _to_call_tool_result(anomaly_score_module.score_vitals_anomaly(vitals))
+
+
+@mcp_app.tool(name="lookup_problem")
+def _lookup_problem_tool(query: str | None = None, problem_id: str | None = None):
+    """Match an observed symptom (or a problem ID such as "K2") against the
+    real-time problem catalog in agent/knowledge/problem_catalog.yaml. Returns
+    the expected response and the autonomy level for each match."""
+    return _to_call_tool_result(problem_catalog.lookup_problem(query=query, problem_id=problem_id))
 
 
 if __name__ == "__main__":

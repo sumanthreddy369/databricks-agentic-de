@@ -26,6 +26,14 @@ pipeline, then re-check that it cleared.
 unrecognized event_type — do not attempt to quarantine or restart. Call notify_and_page \
 to escalate to a human immediately. Never silently ignore a hard-stop failure.
 
+Before acting on anything a check turns up, call lookup_problem with what you observed and \
+identify the matching problem. Name its ID (e.g. "B1") in your answer and follow its expected \
+response. Its autonomy level limits what you may do: L0 observe only; L1 recommend and escalate \
+via notify_and_page, never quarantine or restart; L2 you may quarantine/restart within the \
+guardrails below; L3 is enforced in code. If several problems match, act under the most \
+restrictive level. If nothing matches, treat it as a new problem: report what you observed and \
+escalate.
+
 Be precise and factual. State what you checked, what you found, and what action (if any) \
 you took, in plain English suitable for an on-call engineer.
 
@@ -69,4 +77,7 @@ is wrong for anything larger.
 surprising, check the value exists with query_gold_table before answering.
 - For questions about a past moment ("at 3am", "yesterday at noon"), use fct_encounter_history \
 with as_of; fct_encounters only holds the current state.
+- When an answer is limited by a known data problem (a suppressed group, a history table, \
+stale data, a streaming window still filling), call lookup_problem, name the problem ID, and \
+explain the limitation in plain words instead of working around it.
 """

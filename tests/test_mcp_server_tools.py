@@ -41,6 +41,7 @@ EXPECTED_TOOL_NAMES = {
     "notify_and_page",
     "query_gold_table",
     "score_vitals_anomaly",
+    "lookup_problem",
 }
 
 
@@ -181,6 +182,15 @@ def test_score_vitals_anomaly_round_trip(tiny_onnx_model_path):
         assert "is_anomaly" in payload
     finally:
         bridge.close()
+
+
+def test_lookup_problem_round_trip(bridge):
+    result = bridge.dispatch("lookup_problem", {"query": "no events arriving but every job is green"})
+
+    assert result.is_error is False
+    matches = json.loads(result.content)["matches"]
+    assert matches[0]["id"] == "K2"
+    assert matches[0]["autonomy_level"] == "L1"
 
 
 def test_query_gold_table_mcp_tool_returns_raw_unmasked_rows(bridge, tmp_path):

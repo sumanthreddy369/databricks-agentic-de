@@ -16,9 +16,10 @@ EXPECTED_DE_TOOL_NAMES = {
     "restart_pipeline",
     "notify_and_page",
     "score_vitals_anomaly",
+    "lookup_problem",
 }
 
-EXPECTED_DA_TOOL_NAMES = {"query_gold_table", "aggregate_gold_table"}
+EXPECTED_DA_TOOL_NAMES = {"query_gold_table", "aggregate_gold_table", "lookup_problem"}
 
 _DESTRUCTIVE_NAME_PATTERN = re.compile(r"drop|delete|truncate|purge|wipe|erase", re.IGNORECASE)
 

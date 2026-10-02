@@ -323,4 +323,11 @@ def aggregate_gold_table(
         "min_cell_size": MIN_CELL_SIZE,
         "truncated": len(rows) > MAX_TOOL_RESULT_ROWS,
     }
+    if table in _HISTORY_TABLES and as_of is None:
+        # Problem catalog O4: one row per version, so COUNT(*) here counts
+        # transfers and status changes, not encounters.
+        payload["note"] = (
+            f"{table} has one row per version of each encounter. Without as_of these results count versions, "
+            "not encounters: use as_of for a point in time, or count_distinct on encounter_id."
+        )
     return ToolResult(tool_use_id="", content=json.dumps(payload, default=str))

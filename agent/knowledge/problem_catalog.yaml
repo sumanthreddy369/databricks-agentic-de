@@ -1,0 +1,1023 @@
+# Real-time data-engineering and data-analyst problem catalog for this project's
+# Databricks/GCP stack. Single source of truth for:
+#   - agent/tools/problem_catalog.py (the agent's lookup_problem tool)
+#   - scripts/build_problem_catalog.py (docs/agent_problem_catalog.pdf)
+#   - evals/scenarios.yaml (every scenario names the problems it exercises)
+#
+# level: L0 observe | L1 recommend/escalate | L2 act within guardrails | L3 enforced in code.
+# status: exists | partial | to_build - a manual snapshot of this repo; update it when a tool lands.
+layers:
+- code: A
+  title: Ingestion - Kafka/Redpanda stream and Autoloader roster feed
+  problems:
+  - id: A1
+    title: Consumer lag / backlog grows
+    description: Micro-batches fall behind the topic; vitals reach Gold minutes late, so 'live' dashboards are stale.
+    who: DE
+    detect: 'Streaming progress events: input rate > processed rate for N batches; batch duration trending up; Gold
+      freshness (see B7).'
+    action: Report lag and trend; restart a stuck stream; recommend more workers or autoscaling (cost change needs
+      approval).
+    level: L1-L2
+    status: to_build
+    status_note: needs a get_stream_progress tool
+  - id: A2
+    title: Producer schema drift
+    description: A field is added, renamed, or retyped upstream. Additive changes are usually safe; breaking ones
+      silently null columns.
+    who: DE
+    detect: Diff observed payload schema vs common/contracts.py; rising _corrupt_record or NULL rate on a column.
+    action: 'Classify additive vs breaking. Additive: report and open a contract-change ticket. Breaking: escalate
+      with the diff, never auto-fix.'
+    level: L1
+    status: partial
+    status_note: detect_schema_drift works on local state only; no live source
+  - id: A3
+    title: Poison / malformed messages
+    description: Bad JSON or wrong types land in _corrupt_record (Bronze keeps them).
+    who: DE
+    detect: Corrupt-record ratio per batch vs baseline.
+    action: Quantify, sample (masked) examples for the producer team, escalate if over threshold. Never edit raw
+      data.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: A4
+    title: Duplicate events
+    description: At-least-once delivery redelivers messages after retries/rebalances.
+    who: DE
+    detect: Dedup drop count in silver_fct_vitals vs normal.
+    action: Already handled by dropDuplicatesWithinWatermark; agent only alerts when the duplicate rate spikes (producer
+      bug signal).
+    level: L0-L1
+    status: partial
+    status_note: dedup exists in pipeline; no monitoring tool
+  - id: A5
+    title: Late / out-of-order events beyond the watermark
+    description: are silently dropped (5 min vitals, 30 min encounters).
+    who: DE
+    detect: Count of events with event_ts older than watermark at arrival (Bronze vs Silver reconciliation).
+    action: Report the loss; propose a watermark change with its state-size cost. Change requires human approval
+      + redeploy.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: A6
+    title: Offset gap / retention expiry
+    description: failOnDataLoss=false means expired Kafka data is skipped without failing.
+    who: DE
+    detect: Offset discontinuities in stream progress; row-count gap vs producer count.
+    action: Escalate immediately with the time range lost and a backfill plan. Data loss is never auto-remediated.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: A7
+    title: Broker / auth failure
+    description: Expired SASL credentials, network or firewall change; pipeline update FAILS.
+    who: DE
+    detect: Update FAILED with a connection/auth error class.
+    action: Classify the error; for auth, name the secret that needs rotation and escalate. The agent never handles
+      credentials.
+    level: L1
+    status: partial
+    status_note: check_job_status sees FAILED; no error classification
+  - id: A8
+    title: Roster feed stale
+    description: Autoloader gets no new provider files; dim_providers ages silently.
+    who: DE
+    detect: Time since last file landed vs expected cadence (hourly).
+    action: Page the feed owner with the last-seen file time.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: A9
+    title: Autoloader schema evolution restart
+    description: With addNewColumns, a new column makes the stream stop once by design.
+    who: DE
+    detect: Update failed with an unknown-field / schema-evolution error.
+    action: Recognize it as expected, restart once, confirm it recovered; escalate if it fails again.
+    level: L2
+    status: partial
+    status_note: restart exists; error recognition missing
+- code: B
+  title: Delta Live Tables - Bronze, Silver, Gold
+  problems:
+  - id: B1
+    title: Data-quality drop spike
+    description: expect_or_drop (plausible_vital_value) suddenly drops many rows - device miscalibration, unit change
+      (F vs C).
+    who: DE
+    detect: failed_records per expectation vs rolling baseline (pipeline event log).
+    action: Find the segment (unit, device, itemid); quarantine only if the cause is bounded; otherwise escalate.
+    level: L2
+    status: exists
+    status_note: check_expectation_metrics (local + live, live tested against mocks only)
+  - id: B2
+    title: Hard-stop contract break
+    description: Unknown event_type fails the whole pipeline (expect_or_fail).
+    who: DE
+    detect: Update FAILED on known_event_type.
+    action: Escalate immediately via notify_and_page with context. Never quarantine or restart past it.
+    level: L1
+    status: exists
+    status_note: prompt + chaos tests; pipeline gate fixed in a5a23ec
+  - id: B3
+    title: Pipeline update fails on infrastructure
+    description: OOM, executor lost, cluster can't start, GCP CPU quota exhausted.
+    who: DE
+    detect: Update FAILED with error class (OOM vs quota vs transient).
+    action: Retry transient once; for quota/OOM, escalate with the exact error and a sizing recommendation.
+    level: L2
+    status: partial
+    status_note: restart_pipeline exists; error classification missing
+  - id: B4
+    title: CDC correctness
+    description: apply_changes with sequence ties, NULL keys, or events out of order gives a wrong current state
+      (wrong unit, never-discharged patients).
+    who: DE
+    detect: 'Reconciliation queries: encounters ''in-progress'' far longer than plausible; status counts vs event
+      counts.'
+    action: Report suspicious keys with evidence; propose fix. No data edits.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: B5
+    title: Full refresh needed
+    description: after a logic change or corruption. Full refresh truncates and recomputes tables.
+    who: DE
+    detect: Human request or repeated reconciliation failure.
+    action: Prepare the plan (tables, cost, downtime). Never execute - destructive actions are out of bounds by
+      design.
+    level: L1
+    status: exists
+    status_note: start_update pins full_refresh=false
+  - id: B6
+    title: State store growth
+    description: Long watermarks / high cardinality slow every micro-batch over days.
+    who: DE
+    detect: State rows and batch duration trend upward.
+    action: Report trend, recommend watermark/key changes; human decides.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: B7
+    title: Gold freshness SLA breach
+    description: gold_live_vitals_by_unit stops advancing - clinicians see old numbers.
+    who: DE + DA
+    detect: now() - max(window_end) > SLA.
+    action: Walk upstream (Gold -> Silver -> Bronze -> Kafka) to the first stale layer, report root cause, restart
+      if allowed.
+    level: L2
+    status: to_build
+    status_note: ''
+  - id: B8
+    title: Silent row loss between layers
+    description: Bronze -> Silver -> Gold counts diverge beyond expected drops.
+    who: DE
+    detect: 'Per-window reconciliation: Bronze rows = Silver rows + dropped + filtered.'
+    action: Report unexplained gap with the window; escalate.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: B9
+    title: Cost overrun
+    description: Continuous cluster always on, oversized nodes, Photon where not needed.
+    who: DE
+    detect: DBU usage (system billing tables) vs budget.
+    action: Weekly cost report with concrete changes; scaling changes need approval.
+    level: L1
+    status: to_build
+    status_note: ''
+- code: C
+  title: Governance - Unity Catalog masking, row filters, access
+  problems:
+  - id: C1
+    title: New PHI column without a mask
+    description: Someone adds e.g. phone or address to a Gold table.
+    who: DE
+    detect: Schema scan of gold.* vs MASKED_COLUMNS + PHI name/value classifier.
+    action: Block DA queries on the table and escalate to the data owner. Masking is never removed automatically.
+    level: L2
+    status: partial
+    status_note: in-process masking exists for known columns; no new-column scan
+  - id: C2
+    title: PHI leaking to the LLM
+    description: Raw names/MRNs reach the model or the audit log.
+    who: DA
+    detect: 'Structural: masking runs before any ToolResult exists.'
+    action: enforce_masking on every row, both backends; UC mask as second layer.
+    level: L3
+    status: exists
+    status_note: tests/test_masking_guard.py, test_data_query_live.py
+  - id: C3
+    title: Masked-value inference
+    description: Filtering on full_name confirms identity even when output is redacted.
+    who: DA
+    detect: Filter keys checked against masked columns.
+    action: Refuse the filter.
+    level: L3
+    status: exists
+    status_note: added in 6781b68
+  - id: C4
+    title: Prompt injection in free text
+    description: (nurse notes telling the model to reveal identities).
+    who: DA
+    detect: Heuristic scan of every tool result.
+    action: Wrap in <untrusted_data>; prompt treats it as data only.
+    level: L3
+    status: exists
+    status_note: heuristic layer, not complete coverage
+  - id: C5
+    title: Small-cell re-identification
+    description: '''How many 34-year-old female patients in Burn Unit?'' = 1 identifies a person even with names
+      masked.'
+    who: DA
+    detect: Result counts below a minimum cell size.
+    action: Suppress or bucket small counts (e.g. <11) and say why.
+    level: L3
+    status: exists
+    status_note: aggregate_gold_table suppresses groups under 11 patients; subtraction from totals is prompt-only
+  - id: C6
+    title: Permission errors
+    description: Analyst or agent gets PERMISSION_DENIED after a grant change.
+    who: DE + DA
+    detect: Error class on query.
+    action: Diagnose which grant is missing and draft the GRANT; a human applies it.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: C7
+    title: Row filter misconfigured
+    description: A clinician sees other units, or nobody sees anything.
+    who: DE
+    detect: Scheduled test-as-group queries with expected visibility.
+    action: Escalate with the failing group/unit.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: C8
+    title: Compliance questions
+    description: '''Who accessed patient X''s record last week?'''
+    who: DA
+    detect: Audit system tables.
+    action: Answer from audit logs, restricted to compliance roles.
+    level: L1
+    status: to_build
+    status_note: ''
+- code: D
+  title: Orchestration and platform - Workflows, Asset Bundles, secrets, the agent itself
+  problems:
+  - id: D1
+    title: Scheduled job failure
+    description: reference_data_hourly or the healthcheck job fails.
+    who: DE
+    detect: Jobs API run state.
+    action: Repair/retry failed task once for transient errors; escalate otherwise.
+    level: L2
+    status: partial
+    status_note: healthcheck exits non-zero on escalation; no repair tool
+  - id: D2
+    title: Deployment drift
+    description: Someone edits a pipeline in the UI; workspace no longer matches the bundle.
+    who: DE
+    detect: Compare deployed config vs databricks.yml/resources.
+    action: Report the diff; redeploy only with approval.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: D3
+    title: Secret / token expiry
+    description: DATABRICKS_TOKEN or the Anthropic key expires.
+    who: DE
+    detect: Auth errors on agent calls.
+    action: Name the exact secret scope/key to rotate; escalate.
+    level: L1
+    status: partial
+    status_note: errors surface; no classification
+  - id: D4
+    title: Agent outage
+    description: Claude API down or rate-limited.
+    who: DE
+    detect: Exception in the tool loop.
+    action: Graceful degradation; healthcheck exits 1 so the job shows failed. DLT expectations keep enforcing quality.
+    level: L3
+    status: exists
+    status_note: ''
+  - id: D5
+    title: Agent misbehaving
+    description: Remediation loop or paging storm.
+    who: DE
+    detect: Escalation ceiling; notify_and_page count in audit log.
+    action: Force escalation after 3 attempts; kill switch disables remediation.
+    level: L3
+    status: exists
+    status_note: escalation ceiling, kill switch, anomaly detection
+- code: E
+  title: ML - MLflow-tracked anomaly model served via ONNX
+  problems:
+  - id: E1
+    title: Model drift
+    description: Vitals distribution shifts (new device, MIMIC-IV swap) so anomaly scores stop meaning anything.
+    who: DE
+    detect: Feature drift (e.g. PSI) of live vitals vs training statistics logged in MLflow.
+    action: Report drift; trigger retraining job; promotion needs human approval.
+    level: L1-L2
+    status: to_build
+    status_note: ''
+  - id: E2
+    title: Alert fatigue
+    description: Too many false anomalies; clinicians ignore them.
+    who: DA
+    detect: Analyst/clinician feedback on flagged readings.
+    action: Track precision from feedback; propose threshold changes.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: E3
+    title: Unit / feature mismatch at inference
+    description: (temp in F, missing vital).
+    who: DE
+    detect: Range checks on inputs before scoring.
+    action: Reject the input with a clear error instead of scoring garbage.
+    level: L3
+    status: partial
+    status_note: missing features rejected; Silver now drops F-as-C temps (M4)
+- code: F
+  title: Data analyst questions over Gold
+  problems:
+  - id: F1
+    title: Ambiguous metric definitions
+    description: '''Current ICU patients'' - in-progress only? include transfers in/out today?'
+    who: DA
+    detect: Question maps to more than one definition.
+    action: Use a governed metric definition; if none, ask a clarifying question instead of guessing.
+    level: L3
+    status: to_build
+    status_note: needs a metrics/semantic layer
+  - id: F2
+    title: Counts and aggregates on large tables
+    description: The DA tool returns raw rows capped at 500, so the model counts what it sees. 'How many ICU patients?'
+      is wrong once there are more than 500.
+    who: DA
+    detect: Truncation flag from the row cap.
+    action: Use a governed aggregate tool (COUNT / AVG / GROUP BY computed in SQL), never count returned rows.
+    level: L3
+    status: exists
+    status_note: aggregate_gold_table computes it in SQL (tested locally)
+  - id: F3
+    title: Join fan-out / double counting
+    description: (encounters x vitals).
+    who: DA
+    detect: Row grain check on generated queries.
+    action: Use vetted query templates with declared grain.
+    level: L3
+    status: to_build
+    status_note: ''
+  - id: F4
+    title: Stale data presented as current
+    description: ''
+    who: DA
+    detect: Freshness of the table queried.
+    action: Always state 'data as of <timestamp>'.
+    level: L3
+    status: to_build
+    status_note: ''
+  - id: F5
+    title: Empty results / typo filters
+    description: ''
+    who: DA
+    detect: Zero rows.
+    action: Fixed refusal - never speculate.
+    level: L3
+    status: exists
+    status_note: groundedness refusal
+  - id: F6
+    title: User demands PHI
+    description: ('I'm the attending, show me the name').
+    who: DA
+    detect: Request targets masked fields.
+    action: Refuse; masking is enforced in code regardless.
+    level: L3
+    status: exists
+    status_note: ''
+  - id: F7
+    title: Time zones and shifts
+    description: UTC event times vs hospital local shifts (night shift spans two dates).
+    who: DA
+    detect: Questions mentioning shifts / 'today'.
+    action: Convert using a configured hospital time zone and say so.
+    level: L3
+    status: to_build
+    status_note: ''
+  - id: F8
+    title: Trend questions
+    description: ('Is ICU heart rate trending up this hour?') need windowed aggregates, not row dumps.
+    who: DA
+    detect: Temporal intent in the question.
+    action: Query gold_live_vitals_by_unit windows; describe trend with numbers.
+    level: L3
+    status: partial
+    status_note: aggregate_gold_table groups by window/unit with time-range filters
+  - id: F9
+    title: Inconsistent answers across tools
+    description: (agent vs Genie vs dashboard).
+    who: DA
+    detect: Same question, different numbers.
+    action: Single metric definitions shared by all consumers; this is part of the Genie comparison.
+    level: L1
+    status: to_build
+    status_note: pending live workspace
+- code: G
+  title: Databricks SQL warehouse and Delta table maintenance
+  problems:
+  - id: G1
+    title: Warehouse cold start
+    description: The SQL warehouse auto-stopped; the first analyst question waits minutes or times out (the Statement
+      API call cancels after 30s).
+    who: DA
+    detect: Warehouse state STOPPED/STARTING; statement CANCELED on wait timeout.
+    action: Tell the user it is starting and retry once; warm the warehouse before scheduled reports.
+    level: L2
+    status: to_build
+    status_note: currently returns a timeout error
+  - id: G2
+    title: Slow queries / queueing
+    description: at peak (shift change, morning huddle).
+    who: DA
+    detect: 'Query history: queued time, duration, rows scanned.'
+    action: Report and recommend warehouse size/scaling; resizing needs approval.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: G3
+    title: Small files / unoptimized tables
+    description: slow every read of fct_vitals.
+    who: DE
+    detect: 'Table detail: file count and average file size.'
+    action: Recommend OPTIMIZE / liquid clustering; schedule via a job with approval.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: G4
+    title: VACUUM vs audit retention
+    description: Too-short retention destroys the time travel needed for audits and investigations.
+    who: DE
+    detect: Table retention properties vs policy.
+    action: Flag violations. Never run VACUUM below the policy retention.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: G5
+    title: '''What changed?'' debugging'
+    description: A Gold number moved and nobody knows why.
+    who: DE + DA
+    detect: Table history (operations, versions) and lineage.
+    action: Diff two versions of the table and explain the change with the operation that caused it.
+    level: L0-L1
+    status: to_build
+    status_note: ''
+- code: H
+  title: Databricks AI layer - Genie, AI Search, Agent Bricks, model registry
+  problems:
+  - id: H1
+    title: Genie and the custom agent disagree
+    description: on the same question.
+    who: DA
+    detect: Same golden question run through both.
+    action: Report both answers with their SQL; the shared metric definition decides. Feeds the Genie comparison
+      doc.
+    level: L1
+    status: to_build
+    status_note: pending live workspace
+  - id: H2
+    title: Stale knowledge index
+    description: The Vector Search index lags the runbook source, so the agent cites an outdated runbook.
+    who: DE
+    detect: Index sync status / last sync time vs source table.
+    action: Trigger sync; warn in the answer that guidance may be stale.
+    level: L2
+    status: to_build
+    status_note: knowledge_search is stubbed
+  - id: H3
+    title: Wrong model version live
+    description: The ONNX file served is not the version marked for production in the MLflow registry.
+    who: DE
+    detect: Compare served model hash/version vs registry alias.
+    action: Report the mismatch; redeploy with approval.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: H4
+    title: Agent Bricks / managed-agent comparison
+    description: needs the same scenarios to be fair.
+    who: DE + DA
+    detect: Shared scenario library and golden set.
+    action: Run identical evals on both and record measured results only.
+    level: L1
+    status: to_build
+    status_note: pending live workspace
+- code: I
+  title: GCP infrastructure under Databricks
+  problems:
+  - id: I1
+    title: GCS access failure
+    description: The Autoloader landing bucket returns 403 after a service-account or IAM change.
+    who: DE
+    detect: Update failed with a storage permission error.
+    action: Name the bucket and identity; escalate. No IAM changes by the agent.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: I2
+    title: Terraform drift
+    description: Buckets, Pub/Sub, or secrets changed by hand in the console.
+    who: DE
+    detect: terraform plan shows unexpected changes.
+    action: Report the drift; apply only with approval.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: I3
+    title: GCP quota / capacity
+    description: No CPUs or IPs left in the region; clusters fail to start.
+    who: DE
+    detect: Cluster start failure with a quota error.
+    action: Escalate with the quota name and current usage (see B3).
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: I4
+    title: Trial / budget exhaustion
+    description: Credits run out mid-demo; everything stops.
+    who: DE
+    detect: Spend vs budget from billing data.
+    action: Warn at thresholds; pause non-essential schedules with approval.
+    level: L1
+    status: to_build
+    status_note: ''
+- code: J
+  title: Data overload - volume, bursts, skew
+  problems:
+  - id: J1
+    title: Traffic spike
+    description: Mass-casualty event or shift-wide device reconnect sends 10x normal volume; backlog builds and
+      Gold freshness collapses.
+    who: DE
+    detect: Input rate vs rolling baseline; backlog and batch duration rising together.
+    action: Report the spike and its source mix; scale workers within a pre-approved budget cap; protect Gold freshness
+      first.
+    level: L2
+    status: to_build
+    status_note: ''
+  - id: J2
+    title: One device floods the stream
+    description: Firmware bug sends a reading every few milliseconds for one patient.
+    who: DE
+    detect: Per-source / per-patient event rate far above the expected cadence.
+    action: Name the device and patient key (masked); recommend throttling at the producer. Never drop its data
+      silently.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: J3
+    title: Partition skew / hot key
+    description: One Kafka partition or one key carries most traffic; a few tasks run for minutes while the rest
+      idle.
+    who: DE
+    detect: Per-partition offsets and task duration spread.
+    action: Report the hot key/partition; recommend repartitioning or a producer key change.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: J4
+    title: Oversized messages
+    description: Huge notes or embedded attachments exceed the broker message limit or blow up memory.
+    who: DE
+    detect: Message size distribution; producer errors for too-large records.
+    action: Escalate to the producer team with sizes. (Today MAX_NOTES_LENGTH only caps the injection scan.)
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: J5
+    title: Backfill competes with live data
+    description: Reprocessing a week of history slows real-time vitals for clinicians.
+    who: DE
+    detect: Backfill job running while freshness SLA degrades.
+    action: Recommend running backfills on separate compute or off-peak; pause the backfill with approval.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: J6
+    title: Agent overload
+    description: Huge tool results, long tool loops, or LLM rate limits during an incident when everyone asks at
+      once.
+    who: DE + DA
+    detect: Truncation flags, turn count, rate-limit errors.
+    action: Size caps and retries already apply; summarize instead of dumping rows; queue non-urgent questions.
+    level: L3
+    status: partial
+    status_note: row/char caps, max_turns, retry exist; no queueing
+  - id: J7
+    title: Join memory blow-up
+    description: The stream-static join in gold_live_vitals_by_unit grows with fct_encounters until the driver runs
+      out of memory.
+    who: DE
+    detect: Driver memory and join size trend; OOM failures (B3).
+    action: Recommend pruning to active encounters or a different join strategy.
+    level: L1
+    status: to_build
+    status_note: ''
+- code: K
+  title: Servers down - outages and partial failures
+  problems:
+  - id: K1
+    title: Kafka broker / partition leader down
+    description: Producers buffer, the pipeline stalls.
+    who: DE
+    detect: Connection errors in pipeline events; zero progress with a healthy cluster.
+    action: Separate 'broker down' from 'pipeline broken'; escalate to the platform owner, don't restart the pipeline
+      in a loop.
+    level: L1
+    status: partial
+    status_note: simulator producer retries; no broker check
+  - id: K2
+    title: Silent source
+    description: The hospital interface engine or device gateway stops sending. Every job is green but no data arrives.
+    who: DE
+    detect: Zero input rate during hours when traffic is expected (silence watchdog).
+    action: 'Page the source owner: ''no events from X since T''. Silence must never read as healthy.'
+    level: L1
+    status: to_build
+    status_note: high priority
+  - id: K3
+    title: Compute lost
+    description: Cluster fails, GCP preemptible VMs reclaimed, executors lost mid-batch.
+    who: DE
+    detect: Update FAILED / executor-lost events.
+    action: Retry once (checkpoints make it safe); escalate if it repeats.
+    level: L2
+    status: partial
+    status_note: restart_pipeline exists
+  - id: K4
+    title: SQL warehouse down
+    description: Analyst questions fail.
+    who: DA
+    detect: Warehouse state / statement errors.
+    action: Tell the user plainly; no fallback to unmasked or stale local copies.
+    level: L1
+    status: partial
+    status_note: live errors become tool errors
+  - id: K5
+    title: Databricks or GCP outage
+    description: The agent's own monitoring calls fail, so it can see nothing.
+    who: DE
+    detect: Its tools return errors / timeouts.
+    action: Report status UNKNOWN, never 'healthy'; escalate after N failed checks.
+    level: L3
+    status: partial
+    status_note: API errors surface as tool errors; no explicit UNKNOWN state
+  - id: K6
+    title: GCS throttling or outage
+    description: Autoloader reads fail with 429/503.
+    who: DE
+    detect: Storage error class in pipeline events.
+    action: Back off and retry; escalate if sustained.
+    level: L2
+    status: to_build
+    status_note: ''
+  - id: K7
+    title: Partial failure
+    description: The roster pipeline is down while the stream is up; Gold joins silently drop or misattribute rows.
+    who: DE
+    detect: One pipeline stale while the other is fresh (B7 per pipeline).
+    action: Report the dependency impact on Gold tables, not just 'pipeline X failed'.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: K8
+    title: Recovery surge
+    description: After an outage the whole backlog replays at once and overloads everything (J1).
+    who: DE
+    detect: Backlog size when a source or broker comes back.
+    action: 'Staged recovery: raise capacity first, watch freshness, report time to catch up.'
+    level: L2
+    status: to_build
+    status_note: ''
+- code: L
+  title: Timestamps and matching events in time
+  problems:
+  - id: L1
+    title: Device clock skew
+    description: A device clock is minutes or hours off, or resets to 1970 after a battery swap.
+    who: DE
+    detect: event_ts in the future or far in the past relative to arrival time.
+    action: Flag the device; route impossible timestamps to review rather than into Gold windows.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: L2
+    title: Event time vs processing time
+    description: Aggregating by arrival time puts readings in the wrong window after any delay.
+    who: DE + DA
+    detect: Code review / query check.
+    action: 'Policy: every window and ''when'' question uses event_ts.'
+    level: L3
+    status: exists
+    status_note: pipeline windows use event_ts
+  - id: L3
+    title: Time zone mismatch
+    description: A source sends local time with no offset next to UTC sources.
+    who: DE
+    detect: Systematic offset of whole hours between a source's event_ts and arrival time.
+    action: Report the source and offset; fix at the contract, not by guessing.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: L4
+    title: Daylight saving transitions
+    description: A repeated or missing hour breaks shift reports and hourly counts.
+    who: DA
+    detect: Questions spanning DST change dates.
+    action: Compute in UTC, present in hospital local time, and say so.
+    level: L3
+    status: to_build
+    status_note: ''
+  - id: L5
+    title: Format / precision mismatch
+    description: Epoch milliseconds vs seconds, string formats; parsing fails or lands in 1970 / year 50000.
+    who: DE
+    detect: Parse failures and out-of-range years per source.
+    action: Report the source and format; contract fix.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: L6
+    title: Matching vitals to the right encounter and unit
+    description: Vitals that arrive before the admit event are dropped by the inner join; readings around a transfer
+      are attributed to the unit at processing time, not at reading time.
+    who: DE + DA
+    detect: Vitals with no matching encounter; readings near transfer times.
+    action: Point-in-time (as-of) join on event time; hold unmatched vitals for a grace period instead of dropping.
+    level: L1
+    status: partial
+    status_note: fixed in pipeline code (event-time join, UNASSIGNED bucket); never run on Databricks
+  - id: L7
+    title: Same-second ties
+    description: Admit and transfer stamped in the same second; CDC order is ambiguous.
+    who: DE
+    detect: Duplicate (key, event_ts) pairs in the CDC source.
+    action: Add a tie-breaker (source sequence number) to sequence_by; report ties until then.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: L8
+    title: '''As of'' questions'
+    description: '''What was the ICU census at 3am?'' - current-state tables can''t answer it.'
+    who: DA
+    detect: Question asks about a past point in time.
+    action: Say it can't answer from current-state tables; build SCD type 2 / snapshots. (silver_fct_encounters
+      is SCD type 1 today.)
+    level: L3
+    status: partial
+    status_note: fct_encounter_history + as_of, tested on DuckDB; pipeline never run
+- code: M
+  title: Data content problems
+  problems:
+  - id: M1
+    title: Unit mismatch
+    description: Temperature in F, weight in lbs, value plausible enough to pass range checks.
+    who: DE
+    detect: valueuom inconsistent with itemid; distribution shift for one source.
+    action: Flag the source; never convert silently.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: M2
+    title: Patient identity mismatch
+    description: Same person under two patient_ids; MRN merges and splits. Counts inflate.
+    who: DE + DA
+    detect: Candidate duplicates (masked attributes match), MRN merge events.
+    action: Report candidates to data stewards; never merge records automatically.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: M3
+    title: Orphan keys
+    description: Encounters reference providers or units not in dim_providers because the roster lags.
+    who: DE + DA
+    detect: Anti-join counts between facts and dimensions.
+    action: Report orphans; answers state when results exclude unmatched rows.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: M4
+    title: Sentinel values
+    description: Disconnected devices send 0, -1 or 999. A heart rate of 0 passes plausible_vital_value (BETWEEN
+      0 AND 300).
+    who: DE
+    detect: Spikes of exact sentinel values per device.
+    action: Treat as missing, not as a reading; propose tightening the expectation.
+    level: L1
+    status: exists
+    status_note: per-vital physical limits; SQL tested in DuckDB, pipeline never run
+  - id: M5
+    title: Stuck sensor / flatline
+    description: The same value for hours looks valid to every range check.
+    who: DE
+    detect: Zero variance over a window per device.
+    action: Flag the device; exclude from trends until checked.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: M6
+    title: Test data in production
+    description: Test patients or demo devices inflate counts.
+    who: DA
+    detect: Known test ID patterns / test units.
+    action: Exclude by governed rule and say so in answers.
+    level: L3
+    status: to_build
+    status_note: ''
+  - id: M7
+    title: Replays with new IDs
+    description: A producer resends old readings with fresh event_ids, so dedup by event_id misses them.
+    who: DE
+    detect: Same (patient, itemid, event_ts, value) repeated.
+    action: Report the replay window; content-based dedup check.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: M8
+    title: Encoding problems
+    description: Non-UTF-8 bytes in notes break JSON parsing.
+    who: DE
+    detect: Corrupt records with decode errors (A3).
+    action: Report the source and sample size.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: M9
+    title: PHI in the wrong field
+    description: A name typed into free-text notes bypasses column masking.
+    who: DE + DA
+    detect: Name / identifier detection on free-text columns.
+    action: Keep free text out of Gold (notes are excluded today) and scan any new text column before exposure (C1).
+    level: L3
+    status: partial
+    status_note: notes excluded from Gold; no scanner
+  - id: M10
+    title: Late corrections
+    description: A clinician corrects a vital hours later; the append-only table now holds both values.
+    who: DE + DA
+    detect: Correction events / same reading id with a newer value.
+    action: Model corrections explicitly; answers use the latest corrected value and say so.
+    level: L1
+    status: to_build
+    status_note: ''
+- code: N
+  title: Getting changes to production on Databricks - bundles, deploys, migrations
+  problems:
+  - id: N1
+    title: Dev and prod targets drift
+    description: The dev bundle target works, prod fails - different catalog names, cluster policies, secret scopes,
+      or permissions per target.
+    who: DE
+    detect: databricks bundle validate per target; diff of resolved target configs; first-run failures in prod only.
+    action: Report the exact config difference between targets; fixes go through the bundle and a reviewed deploy.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: N2
+    title: Schema or logic change breaks a streaming checkpoint
+    description: Changing a streaming table's schema or stateful logic (watermark, dedup keys, aggregation) makes the
+      next update fail on incompatible state or schema.
+    who: DE
+    detect: Update fails right after a deploy with a state/schema incompatibility error on one table.
+    action: Name the table and the deploy that changed it; prepare a full-refresh plan for just that table and get
+      human approval. Never full-refresh autonomously.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: N3
+    title: Bad deploy - quality drops right after a release
+    description: New pipeline code passes deploy but expectation failures or row counts change at once.
+    who: DE
+    detect: Failure or metric change starting within minutes of a bundle deployment.
+    action: Correlate the change with the deployment, report both, and recommend redeploying the previous version.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: N4
+    title: Untested pipeline changes reach production
+    description: SQL or DLT logic changes merge without data tests, so problems surface on live data.
+    who: DE
+    detect: Pull request changes pipeline/ or Gold SQL without matching test changes.
+    action: Run the dataset-graph test and scenario evals on the change; block the merge if they fail.
+    level: L1
+    status: partial
+    status_note: CI runs tests and the DLT dataset-graph test; no data tests on real samples
+  - id: N5
+    title: Backfill after a bug fix
+    description: Fixed logic must be applied to past data without double counting or disturbing live streams.
+    who: DE
+    detect: A fix that changes historical results (e.g. the M4 physical-limits change).
+    action: Draft the backfill plan (range, tables, compute, effect on Gold numbers); a human approves and runs it.
+    level: L1
+    status: to_build
+    status_note: ''
+  - id: N6
+    title: Missing environment secrets or volumes on first run
+    description: A job deployed to a new workspace fails because its secret scope, UC volume, or schema was never created.
+    who: DE
+    detect: First run fails with secret-not-found, volume or schema not found.
+    action: List exactly which one-time setup steps are missing (see resources/workflows.yml header).
+    level: L1
+    status: partial
+    status_note: setup steps documented; no automated pre-flight check
+  - id: N7
+    title: Event contract version change
+    description: The producer starts sending a new schema_version; old and new shapes mix in the stream.
+    who: DE
+    detect: New schema_version values appearing in Bronze.
+    action: Report versions seen and their share; confirm the pipeline handles both before the old one is retired.
+    level: L1
+    status: partial
+    status_note: schema_version is in the envelope; nothing counts it yet
+  - id: N8
+    title: New Gold table deployed without grants, masks, or row filters
+    description: A new table reaches Gold before its governance does - e.g. fct_encounter_history needed the same unit
+      row filter as fct_encounters, added by hand.
+    who: DE
+    detect: Post-deploy check that every Gold table has its expected grants, column masks, and row filters.
+    action: Block agent queries on the table and escalate until governance is applied.
+    level: L2
+    status: to_build
+    status_note: ''
+  - id: N9
+    title: Undocumented tables and columns
+    description: Missing table/column comments make analysts and the agent guess what a column means.
+    who: DE + DA
+    detect: Gold tables or columns with empty comments.
+    action: Report gaps; draft comments for an owner to review.
+    level: L0
+    status: to_build
+    status_note: ''
+- code: O
+  title: Analyst SQL correctness on Databricks SQL
+  problems:
+  - id: O1
+    title: NULL semantics
+    description: NOT IN against a list containing NULL returns nothing; COUNT(column) silently skips NULLs.
+    who: DA
+    detect: Generated SQL patterns; counts that differ between COUNT(*) and COUNT(column).
+    action: Build SQL from validated parts only (no free-form SQL); state when NULLs were excluded.
+    level: L3
+    status: partial
+    status_note: the agent can't write free-form SQL; NULL handling isn't reported in answers
+  - id: O2
+    title: Joins that change the answer
+    description: Fan-out duplicates rows; a WHERE on the right table of a LEFT JOIN silently turns it into an inner join.
+    who: DA
+    detect: Row grain before vs after a join.
+    action: Only governed join templates with a declared grain.
+    level: L3
+    status: partial
+    status_note: the agent's tools can't join at all today, so it can't make this mistake - or answer join questions
+  - id: O3
+    title: Ratios computed by the model
+    description: The model divides two counts in its head (percent of ICU patients with high HR) and gets arithmetic
+      or denominator wrong.
+    who: DA
+    detect: Answers containing percentages derived from two tool results.
+    action: Compute ratios in SQL with an explicit numerator and denominator.
+    level: L3
+    status: to_build
+    status_note: ''
+  - id: O4
+    title: Counting history versions instead of entities
+    description: fct_encounter_history has one row per version, so COUNT(*) without as_of counts transfers and status
+      changes, not encounters.
+    who: DA
+    detect: Aggregate on a history table without as_of.
+    action: Use as_of, or count_distinct on the key; the tool flags the case in its result.
+    level: L3
+    status: exists
+    status_note: aggregate_gold_table adds a note when a history table is aggregated without as_of
+  - id: O5
+    title: Reading a streaming window that is still filling
+    description: The latest gold_live_vitals_by_unit window covers only part of its 15 minutes, so its counts look low.
+    who: DA
+    detect: Window end after the latest data time.
+    action: Say the current window is incomplete; compare completed windows only.
+    level: L3
+    status: to_build
+    status_note: ''
+  - id: O6
+    title: Reproducing a number someone saw earlier
+    description: 'An auditor asks why a report said 42 yesterday; the table has changed since.'
+    who: DA
+    detect: Questions about a previous result or report.
+    action: Query the Delta table as of the earlier version/time and explain the difference.
+    level: L1
+    status: to_build
+    status_note: ''
