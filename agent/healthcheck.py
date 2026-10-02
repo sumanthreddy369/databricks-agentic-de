@@ -16,6 +16,8 @@ output) and an exit code the job's status reflects:
   incident in the state file (no PagerDuty/Slack integration exists yet), so
   a failed job run is the one alert channel a human is guaranteed to see,
   via the job's failure notifications.
+- 3: a remediation is waiting for human approval (agent/approvals.py). Nothing
+  was changed; the failed run is what tells a person to decide.
 
 The state file (kill switch, escalation-ceiling counters, incidents) and the
 audit log must persist across runs, so on Databricks both point at a Unity
@@ -47,8 +49,15 @@ HEALTHCHECK_REQUEST = (
 EXIT_OK = 0
 EXIT_AGENT_UNAVAILABLE = 1
 EXIT_ESCALATED = 2
+EXIT_APPROVAL_PENDING = 3
 
-_INITIAL_STATE = {"autonomous_remediation_enabled": True, "remediation_attempts": {}, "incidents": []}
+_INITIAL_STATE = {
+    "autonomous_remediation_enabled": True,
+    # Real deployments start with every remediation waiting for a person.
+    "remediation_approval": "required",
+    "remediation_attempts": {},
+    "incidents": [],
+}
 
 
 def _ensure_state_file(state_path: Path) -> None:
@@ -76,6 +85,8 @@ def run(argv: list[str] | None = None, *, agent: OrchestratorAgent | None = None
         return EXIT_AGENT_UNAVAILABLE
     if "notify_and_page" in result.tool_calls:
         return EXIT_ESCALATED
+    if result.pending_approvals:
+        return EXIT_APPROVAL_PENDING
     return EXIT_OK
 
 

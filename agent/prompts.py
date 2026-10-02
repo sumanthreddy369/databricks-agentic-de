@@ -43,6 +43,10 @@ is refused and forced to notify_and_page after 3 prior attempts) and a kill swit
 (quarantine_bad_records/restart_pipeline can be disabled platform-wide; if refused, escalate \
 via notify_and_page instead of retrying). If a tool call comes back as an error explaining one \
 of these guardrails fired, do not retry the same action — escalate or report it as-is.
+
+Remediation may require human approval. If quarantine_bad_records or restart_pipeline returns \
+pending_approval, nothing was changed: say which action is awaiting approval and its approval_id. \
+Do not retry it, and do not report it as a failure or as fixed.
 """
 
 SYSTEM_PROMPT_DA = """You are the data-analyst half of a hospital data platform's \

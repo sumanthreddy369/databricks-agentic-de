@@ -113,7 +113,7 @@ databricks-agentic-de/
 │   ├── comparisons/                # Genie / Agent Bricks / Vertex AI evaluation plans (Target, not built yet)
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
-├── tests/                          # mocked Anthropic client, zero network calls, 260 tests
+├── tests/                          # mocked Anthropic client, zero network calls, 274 tests
 ├── .github/workflows/              # ci.yml (lint+test), bundle-validate.yml (Databricks-gated)
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
@@ -539,7 +539,7 @@ flowchart LR
 **Two independent workflows, deliberately.** `ci.yml` (lint + test) always
 runs to completion with no external dependency — `uv sync --extra dev` pulls
 the `dev` optional-dependency group (`ruff`, `pytest`) from `pyproject.toml`,
-and the full 260-test suite makes zero network calls (mocked Anthropic
+and the full 274-test suite makes zero network calls (mocked Anthropic
 client throughout). `bundle-validate.yml` checks for
 `DATABRICKS_HOST`/`DATABRICKS_TOKEN` repo secrets **before** installing the
 Databricks CLI or running `databricks bundle validate`, and exits 0 with a
@@ -634,7 +634,7 @@ suite mocks this) and other optional configuration.
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
 | `uv run orchestrator_healthcheck` | One scheduled-style DE-mode health check (needs `ANTHROPIC_API_KEY`); exit 0 healthy, 1 agent unavailable, 2 escalated |
-| `uv run pytest` | Run the full test suite (260 tests, zero network calls) |
+| `uv run pytest` | Run the full test suite (274 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
 | `databricks bundle validate` | Validate the Asset Bundle against a real workspace (Databricks-only) |
@@ -719,6 +719,7 @@ live infrastructure, or pure planning with no implementation at all
 | Prompt-injection heuristic scan (`governance_guard.scan_for_injection`) | Complete |
 | MCP server + client bridge (`mcp_server/`, `agent/mcp_bridge.py`) | Complete |
 | Escalation ceiling, kill switch, immutable audit trail | Complete |
+| Human approval for remediation (`agent/approvals.py`; quarantine/restart queue until a named person approves; requests expire after 4h) | Complete - approver is a recorded name, not an authenticated identity |
 | Behavioral anomaly detection (`detect_anomalous_activity`) | Complete |
 | Retry + timeout (Claude calls, Kafka produce) | Complete |
 | Rate limiting (`simulator/producer.py:RateLimiter`) | Complete |
@@ -748,7 +749,7 @@ live infrastructure, or pure planning with no implementation at all
 ## Testing
 
 ```bash
-uv run pytest            # full suite: 260 tests, ~110s, zero network calls
+uv run pytest            # full suite: 274 tests, ~110s, zero network calls
 uv run pytest -q         # quiet output
 uv run pytest tests/test_masking_guard.py tests/test_prompt_injection_guard.py  # the two core guardrail proofs
 uv run ruff check .      # lint

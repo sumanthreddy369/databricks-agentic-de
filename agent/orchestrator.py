@@ -51,6 +51,7 @@ section for the full list with test pointers):
 
 import json
 import os
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -214,6 +215,11 @@ AGENT_UNAVAILABLE_ANSWER = (
 
 DEFAULT_AUDIT_LOG_PATH = "data/state/audit_log.jsonl"
 
+# Human-approval guardrail: a queued remediation must be approved within this
+# window or it expires. Approving yesterday's restart against today's
+# pipeline state is how stale decisions cause incidents.
+APPROVAL_TTL = timedelta(hours=4)
+
 _REMEDIATION_TOOLS = ("quarantine_bad_records", "restart_pipeline")
 
 
@@ -295,6 +301,9 @@ class OrchestratorAgent:
         self.mcp_bridge = mcp_bridge if mcp_bridge is not None else get_default_bridge()
         self._tool_calls: list[str] = []
         self._remediated = False
+        self._pending_approvals: list[str] = []
+        # Set only while execute_approved() runs a person-approved request.
+        self._approved_by: str | None = None
         self._current_mode: str = "unknown"
 
     def handle(self, request: str, mode: Literal["auto", "de", "da"] = "auto") -> OrchestratorResult:
@@ -302,6 +311,7 @@ class OrchestratorAgent:
         self._current_mode = resolved_mode
         self._tool_calls = []
         self._remediated = False
+        self._pending_approvals = []
 
         if resolved_mode == "de":
             system, tools = SYSTEM_PROMPT_DE, DE_TOOLS
@@ -332,6 +342,7 @@ class OrchestratorAgent:
                 answer=AGENT_UNAVAILABLE_ANSWER,
                 tool_calls=list(self._tool_calls),
                 remediated=False,
+                pending_approvals=list(self._pending_approvals),
             )
 
         return OrchestratorResult(
@@ -339,6 +350,7 @@ class OrchestratorAgent:
             answer=answer,
             tool_calls=list(self._tool_calls),
             remediated=self._remediated,
+            pending_approvals=list(self._pending_approvals),
         )
 
     def _route(self, request: str) -> Literal["de", "da"]:
@@ -489,6 +501,9 @@ class OrchestratorAgent:
         if attempts >= ESCALATION_CEILING:
             return self._force_escalation(table, expectation, attempts)
 
+        if self._needs_approval():
+            return self._queue_for_approval("quarantine_bad_records", {"table": table, "expectation": expectation})
+
         quarantine_input = {"state_path": str(self.state_path), "table": table, "expectation": expectation}
         result = self.mcp_bridge.dispatch("quarantine_bad_records", quarantine_input)
         if not result.is_error:
@@ -505,10 +520,139 @@ class OrchestratorAgent:
         if not self._autonomous_remediation_enabled():
             return self._killswitch_refusal("restart_pipeline", tool_input)
 
+        if self._needs_approval():
+            return self._queue_for_approval(
+                "restart_pipeline", {"pipeline_name": tool_input.get("pipeline_name", "")}
+            )
+
         result = self.mcp_bridge.dispatch("restart_pipeline", {**tool_input, "state_path": str(self.state_path)})
         if not result.is_error:
             self._remediated = True
         return result
+
+    # --- Human approval -----------------------------------------------------
+    #
+    # With remediation_approval = "required" in the state file (the default
+    # whenever the key is absent), quarantine_bad_records and restart_pipeline
+    # never run when the model asks for them. They become pending requests in
+    # the state file, and only a person running agent/approvals.py can approve
+    # one, which then executes through this same dispatch path: kill switch,
+    # escalation ceiling, injection/size guards, and audit log all apply at
+    # execution time, and the audit line records who approved it. No approve
+    # or reject tool is ever offered to the model.
+
+    def _needs_approval(self) -> bool:
+        if self._approved_by is not None:
+            return False
+        state = pipeline_health.load_state(self.state_path)
+        return state.get("remediation_approval", "required") != "auto"
+
+    def _queue_for_approval(self, tool_name: str, tool_input: dict) -> ToolResult:
+        now = datetime.now(UTC)
+        state = pipeline_health.load_state(self.state_path)
+        requests = state.setdefault("pending_approvals", [])
+        for request in requests:
+            if request["status"] == "pending" and datetime.fromisoformat(request["expires_at"]) <= now:
+                request["status"] = "expired"
+        existing = next(
+            (
+                r
+                for r in requests
+                if r["status"] == "pending" and r["tool"] == tool_name and r["input"] == tool_input
+            ),
+            None,
+        )
+        if existing is None:
+            existing = {
+                "id": f"apr_{uuid.uuid4().hex[:10]}",
+                "tool": tool_name,
+                "input": tool_input,
+                "status": "pending",
+                "requested_at": now.isoformat(),
+                "expires_at": (now + APPROVAL_TTL).isoformat(),
+            }
+            requests.append(existing)
+        pipeline_health.save_state(self.state_path, state)
+        self._pending_approvals.append(existing["id"])
+        logger.warning("remediation_queued_for_approval", tool=tool_name, approval_id=existing["id"])
+        payload = {
+            "ok": False,
+            "pending_approval": True,
+            "approval_id": existing["id"],
+            "tool": tool_name,
+            "message": (
+                "Queued for human approval; nothing was changed. Report it as awaiting approval - do not retry it "
+                "and do not treat it as a failure."
+            ),
+        }
+        return ToolResult(tool_use_id="", content=json.dumps(payload))
+
+    def execute_approved(self, approval_id: str, approved_by: str) -> ToolResult:
+        """Runs one pending request on a person's approval. Called only by
+        agent/approvals.py - never offered to the model as a tool."""
+        if not approved_by or not approved_by.strip():
+            return ToolResult(
+                tool_use_id="", content=json.dumps({"error": "approver name required"}), is_error=True
+            )
+        request = self._find_request(approval_id)
+        if isinstance(request, ToolResult):
+            return request
+
+        self._current_mode = "approval"
+        self._approved_by = approved_by.strip()
+        try:
+            result = self._dispatch(request["tool"], dict(request["input"]))
+        finally:
+            self._approved_by = None
+
+        executed = not result.is_error and not json.loads(result.content).get("pending_approval")
+        self._close_request(
+            approval_id, "executed" if executed else "failed", approved_by.strip(), result=result.content
+        )
+        return result
+
+    def reject_approval(self, approval_id: str, rejected_by: str, reason: str = "") -> ToolResult:
+        if not rejected_by or not rejected_by.strip():
+            return ToolResult(
+                tool_use_id="", content=json.dumps({"error": "approver name required"}), is_error=True
+            )
+        request = self._find_request(approval_id)
+        if isinstance(request, ToolResult):
+            return request
+        self._close_request(approval_id, "rejected", rejected_by.strip(), reason=reason)
+        result = ToolResult(tool_use_id="", content=json.dumps({"ok": True, "rejected": approval_id}))
+        self._current_mode = "approval"
+        self._append_audit_log(
+            "approval_rejected",
+            {"approval_id": approval_id, "rejected_by": rejected_by.strip(), "reason": reason},
+            result,
+        )
+        return result
+
+    def _find_request(self, approval_id: str) -> dict | ToolResult:
+        state = pipeline_health.load_state(self.state_path)
+        request = next((r for r in state.get("pending_approvals", []) if r["id"] == approval_id), None)
+        if request is None:
+            return ToolResult(
+                tool_use_id="", content=json.dumps({"error": f"unknown approval: {approval_id}"}), is_error=True
+            )
+        if request["status"] == "pending" and datetime.fromisoformat(request["expires_at"]) <= datetime.now(UTC):
+            self._close_request(approval_id, "expired", None)
+            request["status"] = "expired"
+        if request["status"] != "pending":
+            message = f"approval {approval_id} is {request['status']}, not pending"
+            return ToolResult(tool_use_id="", content=json.dumps({"error": message}), is_error=True)
+        return request
+
+    def _close_request(self, approval_id: str, status: str, decided_by: str | None, **extra) -> None:
+        # Re-read: an executed action has just written to the same state file.
+        state = pipeline_health.load_state(self.state_path)
+        for request in state.get("pending_approvals", []):
+            if request["id"] == approval_id:
+                request.update(
+                    status=status, decided_by=decided_by, decided_at=datetime.now(UTC).isoformat(), **extra
+                )
+        pipeline_health.save_state(self.state_path, state)
 
     def _autonomous_remediation_enabled(self) -> bool:
         """Kill-switch guardrail: reads `autonomous_remediation_enabled` from
@@ -519,10 +663,7 @@ class OrchestratorAgent:
         return bool(state.get("autonomous_remediation_enabled", True))
 
     def _killswitch_refusal(self, tool_name: str, tool_input: dict) -> ToolResult:
-        message = (
-            f"Kill switch active (autonomous_remediation_enabled=false): refused "
-            f"{tool_name}({tool_input})."
-        )
+        message = f"Kill switch active (autonomous_remediation_enabled=false): refused {tool_name}({tool_input})."
         notify_input = {"state_path": str(self.state_path), "message": message}
         escalation = self.mcp_bridge.dispatch("notify_and_page", notify_input)
         self._tool_calls.append("notify_and_page")
@@ -579,6 +720,8 @@ class OrchestratorAgent:
             "output": result.content,
             "is_error": result.is_error,
         }
+        if self._approved_by is not None:
+            entry["approved_by"] = self._approved_by
         self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.audit_log_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, default=str) + "\n")

@@ -10,3 +10,5 @@ class OrchestratorResult:
     answer: str
     tool_calls: list[str] = field(default_factory=list)
     remediated: bool = False
+    # Approval IDs queued during this request (remediations awaiting a person).
+    pending_approvals: list[str] = field(default_factory=list)

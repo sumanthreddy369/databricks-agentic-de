@@ -2,18 +2,26 @@
   "tables": {
     "silver_vitals": {
       "expectations": {
-        "plausible_vital_value": { "failure_count": 0 }
+        "plausible_vital_value": {
+          "failure_count": 0
+        }
       }
     },
     "silver_encounters": {
       "expectations": {
-        "known_event_type": { "failure_count": 0 }
+        "known_event_type": {
+          "failure_count": 0
+        }
       }
     }
   },
   "jobs": {
-    "streaming_patient_pipeline": { "status": "RUNNING" },
-    "reference_data_pipeline": { "status": "SUCCESS" }
+    "streaming_patient_pipeline": {
+      "status": "RUNNING"
+    },
+    "reference_data_pipeline": {
+      "status": "SUCCESS"
+    }
   },
   "schema_snapshot": {
     "patient_events": [
@@ -27,5 +35,6 @@
   },
   "incidents": [],
   "autonomous_remediation_enabled": true,
-  "remediation_attempts": {}
+  "remediation_attempts": {},
+  "remediation_approval": "auto"
 }
