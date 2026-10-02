@@ -45,3 +45,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Eval run reports (evals/run.py) - real model outputs, not committed.
+evals/reports/

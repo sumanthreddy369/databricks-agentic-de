@@ -47,9 +47,10 @@ docs/                    # architecture.md (design rationale), flows/ (split-out
 
 ```bash
 uv sync --extra dev              # install runtime + dev dependencies (uv is the ONLY supported package manager here)
-uv run pytest                    # full test suite — 196 tests, ~110s, zero network calls, no ANTHROPIC_API_KEY needed
+uv run pytest                    # full test suite — 260 tests, ~110s, zero network calls, no ANTHROPIC_API_KEY needed
 uv run pytest tests/test_x.py    # one test file
-uv run ruff check .              # lint (select = E, F, I, UP; line-length 115; target-version py311)
+uv run ruff check .              # lint
+uv run python -m evals.run       # scenario evals against the REAL model - spends API tokens, needs credentials (select = E, F, I, UP; line-length 115; target-version py311)
 uv run python -m ml.train_anomaly_model   # retrain the anomaly model, overwrites ml/models/vitals_anomaly.onnx
 uv run python -m mcp_server.server        # run the MCP server standalone
 uv run python -m simulator.producer --patients 1000 --duration 60   # requires docker compose up -d first
