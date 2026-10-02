@@ -6,13 +6,31 @@ for the full human-facing documentation this file summarizes.
 
 ## Project overview
 
-A healthcare streaming-data platform (Kafka/Autoloader → Delta Live Tables →
-Unity Catalog) kept healthy and made queryable by one hand-built Claude
-tool-calling agent (`agent/orchestrator.py`), instead of a vendor no-code
-tool. The agent runs in two modes:
+A real-time healthcare data platform on Databricks (Kafka/Autoloader →
+Lakeflow Declarative Pipelines (formerly DLT) → Unity Catalog).
 
-- **DE mode**: keeps the streaming pipeline healthy (`agent/tools/pipeline_health.py`), self-remediating auto-fixable failures and escalating hard-stop contract breaks via `notify_and_page`.
-- **DA mode**: answers clinical/ops questions over governed Gold tables (`agent/tools/data_query.py`), with PHI masking and prompt-injection defense enforced in code, not just in a system prompt.
+**The platform's agents do the data work** - Genie for questions, the
+pipeline APIs for actions. **This repo is the glue-and-guardrail layer
+around them** (`agent/orchestrator.py` is its router). The goal is to cut
+routine DE/DA work as fast as is safe, with people approving changes until
+an action class has earned autonomy. See `docs/plan.md`.
+
+- **DA mode:** routes questions to Genie (`agent/tools/genie.py`), wrapped in
+  input and output guardrails. It falls back to `query_gold_table` /
+  `aggregate_gold_table` (`agent/tools/data_query.py`) when Genie isn't
+  configured; that fallback is also the baseline Genie is measured against.
+- **DE mode:** checks pipeline health (`agent/tools/pipeline_health.py`,
+  `_live.py`), matches findings to the problem catalog (`lookup_problem`),
+  escalates via `notify_and_page`, and requests fixes. Fixes run only after
+  a named person approves them (`agent/approvals.py`) unless the state file
+  says `remediation_approval: auto`.
+- **Enforced in code in both modes:** PHI masking before any model sees
+  data, prompt-injection scanning, small-count suppression, the kill
+  switch, the escalation ceiling, and the audit log.
+- **Don't build platform capability we can configure** (a new NL-to-SQL
+  engine, a new pipeline scheduler). New work in this repo should be glue
+  (connecting a platform agent or API) or a guardrail (checking what goes
+  into or comes out of one).
 
 The locally-runnable, tested deliverable is `agent/`, `mcp_server/`,
 `simulator/`, and `ml/`. Everything under `pipeline/`, `governance/`,

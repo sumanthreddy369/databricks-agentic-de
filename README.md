@@ -1,52 +1,117 @@
 # Databricks Agentic DE
 
-A healthcare streaming-data platform (Kafka/Autoloader → Delta Live Tables →
-Unity Catalog) kept healthy and made queryable by one hand-built Claude
-tool-calling agent, instead of a vendor no-code tool. The agent runs in two
-modes — DE (pipeline self-healing) and DA (governed plain-English Q&A) — with
-PHI masking and prompt-injection defense enforced in code and proven by
-tests, not just described in a system prompt.
+A real-time healthcare data platform on Databricks (Kafka/Autoloader →
+Lakeflow Declarative Pipelines, formerly Delta Live Tables → Unity Catalog)
+where **the platform's own agents do the data work and this project builds
+the layer around them**: the glue that connects Genie, Agent Bricks and the
+pipeline APIs to the platform, and the guardrails that make them safe to
+automate.
 
-**Status: in development.** The agent, simulator, MCP tool layer, and ML
-lifecycle run and are tested locally today. The Databricks/GCP platform code
-(DLT pipelines, Unity Catalog SQL, Asset Bundle, Terraform) is structurally
-complete but has never executed against a real workspace — see
-[Feature status](#feature-status) for the precise, per-component breakdown.
+The goal is the one most data teams have right now: **cut the routine work
+data engineers and analysts do, as fast as is safe, without handing an AI
+uncontrolled access to patient data.** Concretely:
+
+- **Platform agents do the work.** Genie answers questions; the pipeline
+  APIs act.
+- **Nothing reaches a model or a person unchecked.** Patient data is masked
+  in code before any model sees it. Requests for identifiers are refused.
+  Genie's SQL and output are checked, not trusted.
+- **People approve every change until it has earned autonomy.**
+  - Quarantines and restarts wait for a named approver.
+  - Routine, proven fix classes can be promoted to run on their own
+    (planned).
+  - Destructive, permission and prod actions always need a person.
+- **Everything is recorded and measured.** The audit log shows every
+  question, SQL statement, action and approver. Evals and a human-work
+  report (planned) show how much routine work went away, and that safety
+  held.
+
+**Status: in development.** The glue-and-guardrail layer, simulator, MCP
+tool layer and ML lifecycle run and are tested locally.
+
+The connections to Genie and the live workspace are tested only against
+mocked APIs. The Databricks/GCP platform code (pipelines, Unity Catalog SQL,
+Asset Bundle, Terraform) is written but has never run on a real workspace.
+No real-model eval results or Genie comparison numbers exist yet. See
+[Feature status](#feature-status) for each component, and
+[`docs/plan.md`](docs/plan.md) for the plan and phases.
 
 ## System overview
 
 ```mermaid
 flowchart TD
-    A["Patient/device event stream"] --> B["Kafka / Redpanda"]
-    A2["Provider roster files"] --> C["Databricks Autoloader"]
-    B --> D["Bronze - Delta Live Tables"]
-    C --> D
-    D --> E["Silver - apply_changes for state /\nwatermark + dedup for vitals"]
-    E --> F["Gold - Delta Live Tables\n+ continuous streaming aggregate"]
-    F --> G["Unity Catalog\nmasking, row filters, lineage"]
-    G --> H["MLflow + ONNX\nanomaly-detection model"]
-    G --> I["Databricks AI Search\npending live workspace"]
-    G --> J["Genie\npending, comparison only"]
-    H --> K["MCP tool server\nmcp_server/server.py"]
-    I -.-> K
-    G --> K
-    K --> L["Orchestrator agent\nClaude tool-calling loop"]
-    L --> M["DE mode: pipeline self-healing"]
-    L --> N["DA mode: plain-English Q&A"]
-    M --> O["notify_and_page\nhuman escalation"]
-    N --> P["Business / clinical user"]
+    U["People<br/>on-call data engineers, clinicians, analysts"] --> IN
 
-    classDef pending stroke-dasharray: 5 5
-    class I,J pending
+    subgraph OURS["This project: glue + guardrails (agent/)"]
+        IN["Input guardrails<br/>injection scan, refuse requests for patient identifiers"] --> R["Router<br/>Claude orchestrator + real-time problem catalog"]
+        R --> OUT["Output guardrails<br/>masking backstop, small-count suppression,<br/>SQL schema check, size caps"]
+        R --> APR["Human approval gate<br/>agent/approvals.py"]
+        OUT --> AUD["Audit log<br/>every question, SQL, action, approver"]
+        APR --> AUD
+        R --> FB["Fallback tools<br/>query / aggregate Gold, local DE tools<br/>(also the baseline Genie is measured against)"]
+    end
+
+    R -->|"analyst questions"| GENIE["Genie space<br/>Conversation API"]
+    R -.->|"runbook / how-to (planned)"| BRICKS["Agent Bricks agent"]
+    R -->|"pipeline health"| LAKE["Lakeflow pipelines<br/>event log, Pipelines / Jobs APIs"]
+    APR -->|"approved actions only"| LAKE
+
+    subgraph PLATFORM["Databricks on GCP"]
+        SRC["Kafka / Redpanda + GCS (Autoloader)"] --> BRZ["Bronze"] --> SLV["Silver"] --> GLD["Gold"]
+        GLD --> UC["Unity Catalog<br/>masks, row filters, grants"]
+        SLV --> ML["MLflow + ONNX<br/>vitals anomaly model"]
+    end
+
+    LAKE --- BRZ
+    GENIE --> UC
+    FB --> UC
+    GENIE --> OUT
+    LAKE --> OUT
+    FB --> OUT
+    OUT --> U
+
+    classDef planned stroke-dasharray: 5 5
+    class BRICKS planned
 ```
 
-Solid boxes are built and tested locally (or structurally complete for
-Databricks). Dashed boxes (Databricks AI Search, Genie) are pending a live
-GCP-connected Databricks workspace — see
-[`docs/comparisons/`](docs/comparisons/) for why those aren't faked. The
-sections below break this diagram into one flow per stage, each with its own
-diagram and rules/edge-case notes. For the full architectural rationale
-behind each decision, see [`docs/architecture.md`](docs/architecture.md).
+Every arrow into "our layer" passes the guardrails, and every action out of
+it passes the approval gate. The dashed box is planned. Databricks Assistant
+has no public API, so people use it directly in notebooks; the layer reads
+pipeline state from the event log and Pipelines/Jobs APIs instead.
+
+### How an analyst question flows
+
+```mermaid
+flowchart LR
+    Q["Clinician asks<br/>'How many patients are in the ICU?'"] --> IG{"Asks for names / MRNs?"}
+    IG -->|"yes"| REF["Refused, never sent"]
+    IG -->|"no"| G["ask_genie<br/>Genie writes + runs SQL"]
+    G -->|"not configured"| FB["aggregate_gold_table<br/>count computed in SQL"]
+    G --> SC{"SQL reads only Gold?"}
+    SC -->|"no"| WH["Result withheld, escalate"]
+    SC -->|"yes"| OG["Mask PHI columns and leaked values<br/>suppress groups under 11 patients"]
+    FB --> OG
+    OG --> AU["Audit log"] --> A["Answer + which source answered"]
+```
+
+### How a pipeline incident flows
+
+```mermaid
+flowchart LR
+    H["Scheduled healthcheck<br/>every 15 min"] --> CHK["Check expectations,<br/>jobs, schema drift"]
+    CHK --> LK["lookup_problem<br/>match to catalog ID + autonomy level"]
+    LK --> D{"Autonomy level"}
+    D -->|"L1: needs a person"| PG["notify_and_page<br/>job exits 2"]
+    D -->|"L2: fixable"| GATE{"Approval required?"}
+    GATE -->|"yes (default)"| Q["Queued request<br/>job exits 3, person decides"]
+    Q -->|"approve --by name"| ACT["Quarantine / restart<br/>kill switch + escalation limit still apply"]
+    Q -->|"reject or 4h expiry"| NO["Nothing changes"]
+    GATE -->|"auto (earned, planned)"| ACT
+    ACT --> AU["Audit log with approver"]
+```
+
+The sections below cover each flow in detail. For the reasoning behind each
+decision, see [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
@@ -311,18 +376,23 @@ flowchart TD
     I -->|"no"| J["return final text answer"]
     I -->|"yes"| K["_dispatch(tool_name, tool_input)"]
     K --> L{"which tool?"}
-    L -->|"query_gold_table"| M["_dispatch_query_gold_table\ndirect in-process call"]
+    L -->|"ask_genie"| GN["agent/tools/genie.py\nPHI-request refusal, SQL schema check,\nmasking backstop, small-count suppression"]
+    L -->|"query_gold_table / aggregate_gold_table"| M["direct in-process call\n(fallback when Genie is not configured)"]
     L -->|"quarantine or restart"| N["kill switch + escalation ceiling\nsee docs/flows/guardrails.md"]
-    L -->|"health check, anomaly, notify"| O["mcp_bridge.dispatch\nMCP over stdio"]
+    L -->|"health check, anomaly, notify, lookup_problem"| O["mcp_bridge.dispatch\nMCP over stdio"]
     M --> P{"rows empty?"}
     P -->|"yes"| R["GROUNDEDNESS_REFUSAL\nfixed refusal string"]
     P -->|"no"| S["enforce_masking\nbefore ToolResult exists"]
-    N -->|"allowed"| O
+    N -->|"allowed"| AP{"approval required?"}
+    AP -->|"yes (default)"| PQ["queued for a named approver\nagent/approvals.py"]
+    AP -->|"auto"| O
     N -->|"refused"| T["notify_and_page escalation"]
+    GN --> U
     S --> U["_apply_injection_guard\n+ _apply_output_size_guard"]
     R --> U
     O --> U
     T --> U
+    PQ --> U
     U --> Y["_append_audit_log\nappend-only JSONL"]
     Y --> H
     H -->|"Claude API raises"| Z["graceful degradation\nfixed safe answer"]

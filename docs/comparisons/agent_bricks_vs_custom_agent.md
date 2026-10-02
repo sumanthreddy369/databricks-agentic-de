@@ -1,23 +1,32 @@
 # Agent Bricks vs. this project's custom orchestrator agent
 
 Databricks Agent Bricks is the platform's managed, declarative way to build
-and deploy an agent (tool/knowledge-source wiring, evaluation, and serving
-handled by the platform). This project instead hand-builds the whole tool
-loop (`agent/llm.py:Claude.run_tool_loop`, `agent/orchestrator.py`) directly
-against the Anthropic SDK, now also wrapping the DE-mode tools in a real MCP
-server (`mcp_server/server.py`) rather than a platform-specific agent
-framework. This document is an evaluation plan for comparing the two
-approaches, not a completed comparison — no Agent Bricks deployment has been
-built or measured for this project.
+and deploy an agent; tool/knowledge-source wiring, evaluation and serving
+are handled by the platform. In this project's direction (`docs/plan.md`),
+platform agents do the work and this repo is the glue-and-guardrail layer
+around them. So the question here is **which parts of that layer the
+platform can take over**, not whether to use Agent Bricks at all.
+
+Two concrete uses are planned:
+
+1. **A runbook / how-to agent:** an Agent Bricks knowledge agent over the
+   real-time problem catalog (`agent/knowledge/problem_catalog.yaml`). This
+   could replace or back our deterministic `lookup_problem` matcher.
+2. **Hosting the router itself:** running the orchestrator's routing on
+   Agent Bricks instead of our own tool loop (`agent/llm.py`,
+   `agent/orchestrator.py`). Our guardrails, approval gate and audit log
+   stay as code that wraps whatever does the routing.
+
+This document is an evaluation plan, not a completed comparison. No Agent
+Bricks deployment has been built or measured for this project.
 
 ## Why this comparison is worth doing
 
-Agent Bricks is the most direct platform-native alternative to this entire
-project's agent layer (DE-mode + DA-mode combined, not just the Q&A half
-Genie would compare against). Understanding the real trade-off — managed
-deployment/evaluation convenience vs. full control over guardrail internals
-and unit-testability — is directly relevant to whether a real production
-version of this project should ever migrate off the hand-built path.
+Every piece of the layer the platform can run for us is less code to own,
+which is the point of buying before building. What has to stay ours is
+whatever the platform can't guarantee in a way we can test: masking before
+the model, the approval gate, the audit trail. Measuring both uses above
+shows where that line actually is.
 
 ## Evaluation criteria
 

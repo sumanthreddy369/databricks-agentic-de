@@ -1,23 +1,30 @@
-# Genie vs. this project's custom orchestrator agent
+# Genie: alone, behind our guardrails, and against our fallback
 
-This project's DA-mode Q&A path (`agent/orchestrator.py` + `agent/tools/data_query.py`)
-is a hand-built Claude tool-loop agent, not Databricks Genie (the platform's
-own no-code/low-code natural-language-to-SQL assistant over Unity Catalog
-tables). That was a deliberate choice for this portfolio project — see
-`README.md`'s framing ("this project takes the harder, more differentiated
-path... one hand-built orchestrator agent — not a vendor no-code tool") — but
-it's worth being honest about what that choice actually costs and buys,
-rather than asserting the custom path is strictly better. This document is an
-evaluation plan for that comparison, not its result.
+Genie (Databricks' natural-language-to-SQL agent over Unity Catalog) is the
+**primary** way this project answers analyst questions. DA mode routes
+questions to it through `agent/tools/genie.py`. This project doesn't build a
+replacement for Genie. It builds the glue and guardrails around it, plus a
+fallback (`aggregate_gold_table` / `query_gold_table`) for when Genie isn't
+available.
+
+So the comparison measures three configurations on the same questions:
+
+1. **Genie on its own**, as a team would use it straight from the platform.
+2. **Genie behind this layer** (`ask_genie`): PHI-request refusal, SQL
+   schema check, masking backstop, small-count suppression, audit.
+3. **The fallback agent** (no Genie): the baseline, and what runs when Genie
+   is down or not configured.
+
+This document is an evaluation plan for that comparison, not its result.
 
 ## Why this comparison is worth doing
 
-Genie is the platform-native answer to exactly the same job DA-mode does
-(governed natural-language querying over Gold tables), so it's the most
-direct apples-to-apples comparison available for this project's core
-differentiator. A hiring manager or reviewer evaluating "why build this by
-hand instead of using the vendor tool" deserves a real, tested answer, not
-just an architectural argument.
+It answers the question every team adopting a platform agent has to answer
+before automating more: **how much does the guardrail layer add, and what
+does it cost?** For example: does it catch leaks or out-of-scope SQL that
+Genie alone lets through, does it block answers it shouldn't, and how much
+latency does it add? Measured numbers here are what justify the layer, and
+what would justify trusting Genie with more.
 
 ## Evaluation criteria
 

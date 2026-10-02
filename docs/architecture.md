@@ -1,5 +1,23 @@
 # Architecture
 
+## Role of this layer
+
+The platform's agents do the work: Genie answers questions, the Lakeflow
+Pipelines/Jobs APIs act on pipelines, and Agent Bricks is planned for
+runbook questions. Everything in `agent/` is the layer around them:
+
+- **Routing:** the orchestrator below decides which platform agent or API
+  a request goes to.
+- **Guardrails:** checks on what goes in and what comes out (masking,
+  injection, small counts, SQL schema).
+- **Human approval:** for every action (`agent/approvals.py`).
+- **The audit log.**
+
+The orchestrator's own query and pipeline tools are the fallback when a
+platform agent isn't configured, and the baseline platform agents are
+measured against. See `docs/plan.md` for the goal (less human work, earned
+autonomy) and the phases.
+
 ## Two modes, one entry point
 
 `agent.orchestrator.OrchestratorAgent.handle(request, mode="auto")` is the
