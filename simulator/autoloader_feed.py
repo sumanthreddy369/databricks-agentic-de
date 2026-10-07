@@ -46,8 +46,11 @@ def build_provider_batch(size: int = 5) -> list[dict]:
 def write_batch_file(landing_dir: Path, batch: list[dict]) -> Path:
     landing_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
-    path = landing_dir / f"providers_batch_{timestamp}_{uuid.uuid4().hex[:6]}.json"
-    path.write_text(json.dumps(batch, indent=2))
+    # JSON lines (one provider per line): Autoloader's JSON reader treats
+    # each line as a record, so a single pretty-printed array would be read
+    # as corrupt rows.
+    path = landing_dir / f"providers_batch_{timestamp}_{uuid.uuid4().hex[:6]}.jsonl"
+    path.write_text("".join(json.dumps(row) + "\n" for row in batch))
     return path
 
 

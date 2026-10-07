@@ -52,3 +52,9 @@ GRANT USE SCHEMA, SELECT ON SCHEMA healthcare_agentic_de.gold TO `clinical_reade
 -- from the unit-scoped row filter. Membership should be tightly controlled
 -- and audited outside of this scaffold.
 CREATE GROUP IF NOT EXISTS phi_unmasked;
+
+-- Landing area for files Autoloader reads in the free-trial setup
+-- (patient_events_source = files): simulator/file_feed.py output goes to
+-- landing/patient_events, simulator/autoloader_feed.py output to
+-- landing/providers. Ingest reads it; nothing else should.
+CREATE VOLUME IF NOT EXISTS healthcare_agentic_de.bronze.landing;

@@ -1,7 +1,7 @@
-# Minimal Databricks Asset Bundle definition. Not deployed in this
-# environment — validated structurally only via
-# .github/workflows/bundle-validate.yml (which requires DATABRICKS_HOST /
-# DATABRICKS_TOKEN secrets and skips gracefully without them).
+# Databricks Asset Bundle definition. `databricks bundle validate -t dev`
+# passes against the project's GCP trial workspace; nothing has been
+# deployed yet. CI (.github/workflows/bundle-validate.yml) validates only
+# when DATABRICKS_HOST / DATABRICKS_TOKEN repo secrets exist.
 bundle:
   name: databricks-agentic-de
 
@@ -30,17 +30,36 @@ variables:
       so local dev (docker-compose) and this bundle target the same code path.
     default: localhost:19092
   provider_landing_path:
-    description: GCS landing path Autoloader watches for provider roster batch files.
+    description: Landing path Autoloader watches for provider roster batch files.
     default: gs://healthcare-agentic-de-landing/providers
+  patient_events_source:
+    description: >-
+      `kafka` (production: a broker the workspace can reach) or `files`
+      (free trial / dev: JSON-lines files from simulator/file_feed.py in a
+      Unity Catalog volume). See pipeline/01_ingest/kafka_patient_events.py.
+    default: kafka
+  patient_events_path:
+    description: Volume path Autoloader reads patient event files from when the source is `files`.
+    default: /Volumes/healthcare_agentic_de/bronze/landing/patient_events
 
 targets:
   dev:
     mode: development
     default: true
     workspace:
-      # GCP-hosted Databricks workspace. Placeholder — replace with your own
-      # workspace URL before running `databricks bundle validate/deploy`.
-      host: https://REPLACE-WITH-YOUR-WORKSPACE.gcp.databricks.com
+      # The project's GCP-hosted Databricks trial workspace (dev). The URL is
+      # an address, not a credential: access needs `databricks auth login`.
+      host: https://8259555713942027.7.gcp.databricks.com
+    # Free-trial settings: no Kafka (a cloud pipeline can't reach a laptop
+    # broker), landing files in a UC volume instead of a GCS bucket, and the
+    # streaming pipeline triggered on demand instead of running 24/7.
+    variables:
+      patient_events_source: files
+      provider_landing_path: /Volumes/healthcare_agentic_de/bronze/landing/providers
+    resources:
+      pipelines:
+        streaming_patient_pipeline:
+          continuous: false
 
   prod:
     mode: production

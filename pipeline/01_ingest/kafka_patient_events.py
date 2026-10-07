@@ -1,13 +1,25 @@
-"""Databricks-only DLT ingest step. Not executed in this environment — requires
-a real cluster with `dlt` and a reachable Kafka-compatible broker (Redpanda in
-local dev via docker-compose, a managed Kafka/Confluent cluster in prod).
+"""Databricks-only DLT ingest step for patient events.
 
-Reads the raw `patient_events` topic as a streaming source and parses the JSON
-payload into the typed schema defined in pipeline/common/schemas.py. This is
-the only place PERMISSIVE-mode JSON parsing happens — anything that doesn't
-match the schema lands in `_corrupt_record` rather than crashing ingest;
-Bronze is expected to carry that column through untouched (see
-02_bronze/bronze_patient_events.py).
+Two interchangeable sources, chosen by the pipeline setting
+`pipeline.patient_events_source`:
+
+- `kafka` (production): the `patient_events` topic on a Kafka-compatible
+  broker the workspace can reach (a managed Kafka/Confluent cluster).
+- `files` (free trial / dev): JSON-lines files the simulator writes and
+  uploads to a Unity Catalog volume (`simulator/file_feed.py`), picked up by
+  Autoloader. A cloud pipeline can't reach the Redpanda broker on a laptop,
+  and this needs no extra service or account.
+
+Both produce exactly the same columns, so Bronze and everything after it
+don't know which source ran: `kafka_key`, `kafka_timestamp` (the arrival
+time), `payload` (the event parsed with pipeline/common/schemas.py), and
+`_corrupt_record`. `_corrupt_record` holds the raw text of any message that
+didn't parse into an event - one where the payload and its key fields came
+back empty - so Bronze can keep it rather than lose it. Bronze reads this
+column; it was never produced before this file computed it, which would have
+failed the first real run.
+
+Never run on Databricks in this environment.
 """
 
 import sys
@@ -25,16 +37,14 @@ sys.path.append(spark.conf.get("bundle.sourcePath", "."))
 from common.contracts import KAFKA_TOPIC_PATIENT_EVENTS  # noqa: E402
 from pipeline.common.schemas import PATIENT_EVENT_SCHEMA  # noqa: E402
 
-KAFKA_BOOTSTRAP_SERVERS = spark.conf.get(
-    "pipeline.kafka_bootstrap_servers", "localhost:19092"
+PATIENT_EVENTS_SOURCE = spark.conf.get("pipeline.patient_events_source", "kafka")
+KAFKA_BOOTSTRAP_SERVERS = spark.conf.get("pipeline.kafka_bootstrap_servers", "localhost:19092")
+PATIENT_EVENTS_PATH = spark.conf.get(
+    "pipeline.patient_events_path", "/Volumes/healthcare_agentic_de/bronze/landing/patient_events"
 )
 
 
-@dlt.table(
-    name="raw_patient_events",
-    comment="Raw Kafka payloads from the patient_events topic, JSON-parsed with permissive error handling.",
-)
-def raw_patient_events():
+def _read_kafka():
     return (
         spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS)
@@ -45,10 +55,39 @@ def raw_patient_events():
         .select(
             F.col("key").cast("string").alias("kafka_key"),
             F.col("timestamp").alias("kafka_timestamp"),
-            F.from_json(
-                F.col("value").cast("string"),
-                PATIENT_EVENT_SCHEMA,
-                options={"mode": "PERMISSIVE", "columnNameOfCorruptRecord": "_corrupt_record"},
-            ).alias("payload"),
+            F.col("value").cast("string").alias("_raw"),
         )
+    )
+
+
+def _read_files():
+    # One JSON event per line; `text` keeps each raw line so a malformed one
+    # can be kept in _corrupt_record exactly as it arrived.
+    return (
+        spark.readStream.format("cloudFiles")
+        .option("cloudFiles.format", "text")
+        .load(PATIENT_EVENTS_PATH)
+        .select(
+            F.lit(None).cast("string").alias("kafka_key"),
+            F.col("_metadata.file_modification_time").alias("kafka_timestamp"),
+            F.col("value").alias("_raw"),
+        )
+    )
+
+
+@dlt.table(
+    name="raw_patient_events",
+    comment="Raw patient events (Kafka or landing files), JSON-parsed with permissive error handling.",
+)
+def raw_patient_events():
+    raw = _read_files() if PATIENT_EVENTS_SOURCE == "files" else _read_kafka()
+    parsed = raw.withColumn("payload", F.from_json(F.col("_raw"), PATIENT_EVENT_SCHEMA, {"mode": "PERMISSIVE"}))
+    unparsed = F.col("payload").isNull() | (
+        F.col("payload.event_id").isNull() & F.col("payload.event_type").isNull()
+    )
+    return parsed.select(
+        "kafka_key",
+        "kafka_timestamp",
+        "payload",
+        F.when(unparsed, F.col("_raw")).alias("_corrupt_record"),
     )

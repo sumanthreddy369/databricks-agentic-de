@@ -23,10 +23,14 @@ resources:
       catalog: healthcare_agentic_de
       schema: silver
       continuous: true
-      photon: true
+      # Serverless: billed as Databricks usage (trial credits), not as VMs in
+      # the GCP project. Photon is built in.
+      serverless: true
       configuration:
         bundle.sourcePath: ${workspace.file_path}
         pipeline.kafka_bootstrap_servers: "${var.kafka_bootstrap_servers}"
+        pipeline.patient_events_source: "${var.patient_events_source}"
+        pipeline.patient_events_path: "${var.patient_events_path}"
       libraries:
         - file:
             path: ../pipeline/01_ingest/kafka_patient_events.py
@@ -52,7 +56,9 @@ resources:
       catalog: healthcare_agentic_de
       schema: silver
       continuous: false
-      photon: true
+      # Serverless: billed as Databricks usage (trial credits), not as VMs in
+      # the GCP project. Photon is built in.
+      serverless: true
       configuration:
         bundle.sourcePath: ${workspace.file_path}
         pipeline.provider_landing_path: "${var.provider_landing_path}"
