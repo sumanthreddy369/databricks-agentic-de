@@ -5,10 +5,8 @@ Repository: <https://github.com/sumanthreddy369/databricks-agentic-de>
 Each box shows the technology and the repo path to pull it from. Line
 styles:
 
-- solid boxes run and are tested locally;
-- dashed boxes are Databricks/GCP code that is written but has never run on
-  a workspace;
-- dotted boxes are on disk locally but not pushed to GitHub yet.
+- solid boxes run (locally or on the Databricks trial workspace);
+- dashed boxes are written but have never run (Terraform, Cloud Run).
 
 ```mermaid
 flowchart TD
@@ -59,7 +57,13 @@ flowchart TD
         HC["Scheduled healthcheck job<br/>agent/healthcheck.py"]
         GCP["GCP: Secret Manager, OpenTelemetry, Terraform, Cloud Run<br/>agent/secrets.py, agent/otel.py<br/>infra/terraform/, infra/cloudrun/"]
         CI["CI<br/>.github/workflows/ci.yml<br/>.github/workflows/bundle-validate.yml"]
-        EVAL["Scenario evals<br/>evals/"]
+        EVAL["Evals: golden question set + scenarios<br/>evals/golden/, evals/"]
+    end
+
+    subgraph OBSV["10. Observability"]
+        TEL["Traces + metrics (OpenTelemetry)<br/>agent/otel.py, agent/telemetry.py"]
+        COL["OTel Collector -> Prometheus + Jaeger<br/>observability/otel-collector.yaml"]
+        GRAF["Grafana dashboard<br/>observability/grafana/"]
     end
 
     USERS["9. Users<br/>on-call data engineers - pages<br/>clinicians / analysts - questions"]
@@ -90,11 +94,11 @@ flowchart TD
     CI -.-> AGENT
     EVAL -.-> ORCH
     CHAOS -.-> EVAL
+    ORCH --> TEL --> COL --> GRAF --> USERS
 
     classDef unrun stroke-dasharray: 6 4
     classDef localonly stroke-dasharray: 2 2
-    class ING,BRONZE,GATE,SILVER,GOLD,UC,WF,GCS unrun
-    class KB,EVAL localonly
+    class GCS unrun
 ```
 
 ## Component -> repo path
@@ -106,27 +110,30 @@ flowchart TD
 | Transport | Kafka / Redpanda (local broker + console) | `docker-compose.yml` | Runs locally |
 | Transport | GCS landing bucket | `infra/terraform/` | Never applied |
 | Contract | Event schema, masked columns, physical vital limits, cell size | `common/contracts.py`, `pipeline/common/schemas.py` | Tested locally |
-| Ingest | Spark Structured Streaming from Kafka; Autoloader (cloudFiles) | `pipeline/01_ingest/` | Never run on Databricks |
-| Bronze | DLT streaming tables | `pipeline/02_bronze/` | Never run on Databricks |
-| Silver | DLT `apply_changes` (SCD1 + SCD2), watermark + dedup, expectations | `pipeline/03_silver/` | Graph test only |
-| Gold | DLT tables in `healthcare_agentic_de.gold` + streaming aggregate | `pipeline/04_gold/` | Graph test only |
-| Pipeline config | Asset Bundle pipelines | `resources/dlt_pipeline.yml` | Never deployed |
-| Governance | Unity Catalog masks, row filters, grants, ops volume | `governance/05_unity_catalog/` | Never run |
-| ML | IsolationForest -> MLflow -> ONNX | `ml/train_anomaly_model.py`, `ml/models/` | Tested locally |
-| Serving | Databricks SQL Statement Execution API + Pipelines API | `agent/databricks_client.py` | Mock-tested only |
+| Ingest | Autoloader (cloudFiles) on the trial; Kafka in prod | `pipeline/01_ingest/` | Runs on Databricks (Autoloader); Kafka path not run there |
+| Bronze | Lakeflow streaming tables | `pipeline/02_bronze/` | Runs on Databricks |
+| Silver | Lakeflow `apply_changes` (SCD1 + SCD2), expectations | `pipeline/03_silver/` | Runs on Databricks |
+| Gold | Tables and materialized views in `healthcare_agentic_de.gold`, masks declared | `pipeline/04_gold/` | Runs on Databricks |
+| Pipeline config | Asset Bundle pipelines | `resources/dlt_pipeline.yml` | Deployed (dev) |
+| Governance | Unity Catalog masks, row filters, grants | `pipeline/04_gold/`, `governance/05_unity_catalog/` | Masks verified on the workspace; row filter and grants not tested |
+| ML | IsolationForest -> MLflow -> ONNX | `ml/`, `agent/tools/anomaly_score.py` | Evaluated: advisory only; rules decide (`docs/eda/`) |
+| Serving | Databricks SQL Statement Execution API + Pipelines API; Genie | `agent/databricks_client.py`, `agent/tools/genie.py` | SQL and Genie run live (golden set); Pipelines API mock-tested |
 | Serving (local) | DuckDB Gold stand-in | `data/seed/gold_seed.sql` | Tested locally |
 | Agent | Claude tool loop, mode routing, guardrails | `agent/orchestrator.py`, `agent/llm.py`, `agent/prompts.py` | Tested locally |
 | Agent | PHI masking + prompt-injection scan | `agent/tools/governance_guard.py` | Tested locally |
 | Agent | MCP server + client (DE tools) | `mcp_server/server.py`, `agent/mcp_bridge.py` | Tested locally |
 | Agent | DE tools (local + live) | `agent/tools/pipeline_health.py`, `agent/tools/pipeline_health_live.py` | Local tested; live mock-tested |
 | Agent | DA tools (query + aggregate, small-cell suppression) | `agent/tools/data_query.py` | Tested locally |
-| Agent | Problem catalog + `lookup_problem` | `agent/knowledge/problem_catalog.yaml`, `agent/tools/problem_catalog.py` | Tested locally; **not pushed yet** |
+| Agent | Problem catalog + `lookup_problem` | `agent/knowledge/problem_catalog.yaml`, `agent/tools/problem_catalog.py` | Tested locally |
+| Agent | Metrics layer (`compute_metric`, Genie instructions) | `agent/knowledge/metrics.yaml`, `agent/tools/metrics.py` | Runs (live Genie space synced) |
+| Agent | Human approval + earned autonomy | `agent/approvals.py`, `agent/autonomy.py` | Tested locally |
 | Agent | Vector Search knowledge tool | `agent/tools/knowledge_search.py` | Stubbed |
 | Orchestration | Workflows: hourly roster job, 15-min agent healthcheck | `resources/workflows.yml`, `agent/healthcheck.py` | CLI tested; job never run |
-| Platform | GCP Secret Manager, OpenTelemetry | `agent/secrets.py`, `agent/otel.py` | No-op unless configured |
+| Platform | GCP Secret Manager | `agent/secrets.py` | No-op unless configured |
+| Observability | OpenTelemetry Collector, Prometheus, Jaeger, Grafana | `agent/otel.py`, `agent/telemetry.py`, `observability/` | Runs locally in Docker (demo traffic) |
 | Platform | Terraform, Cloud Run | `infra/` | Never applied |
 | Quality | CI (lint + tests), bundle validate | `.github/workflows/` | CI passing on GitHub |
-| Quality | Scenario evals for the agent | `evals/` | Harness tested; **not pushed yet**; real-model runs not done |
+| Quality | Golden question set (live Genie) + scenario evals | `evals/golden/`, `evals/` | Golden set measured (2 live runs); scenarios not run on a real model |
 | Docs | Problem catalog PDF + generator | `docs/agent_problem_catalog.pdf`, `scripts/build_problem_catalog.py` | Pushed |
 
 ## Pulling it

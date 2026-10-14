@@ -1,6 +1,9 @@
 """OpenTelemetry tracing for this project's NON-LLM parts — the simulator's
-Kafka publish loop (`simulator/producer.py:send`) and the DE-mode
-pipeline-health tool calls (`agent/tools/pipeline_health.py`). LLM-call
+Kafka publish loop (`simulator/producer.py:send`), the DE-mode
+pipeline-health tool calls (`agent/tools/pipeline_health.py`), and every
+orchestrator request (`agent.request`) and tool call (`agent.tool`, with the
+guardrail outcome from `tool_outcome`). Spans carry ids, names and outcomes
+only - never the question, tool inputs or results. LLM-call
 tracing already has its own, separate mechanism (`agent/llm.py:Tracer`,
 optional Langfuse spans) — this module is deliberately independent of that
 one, covering the surrounding infrastructure a Langfuse trace wouldn't see.
@@ -23,6 +26,7 @@ instrumented code, then inspect `exporter.get_finished_spans()` — see
 `tests/test_otel_tracing.py`.
 """
 
+import json
 import os
 import threading
 
@@ -75,13 +79,38 @@ def _attach_otlp_exporter(provider: TracerProvider, endpoint: str) -> None:
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
+        # No endpoint argument: the exporter reads OTEL_EXPORTER_OTLP_ENDPOINT
+        # itself and appends /v1/traces. Passing the base URL explicitly would
+        # post to the bare host instead (an explicit endpoint is used as-is).
+        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
     except Exception:
         logger.warning(
             "otlp_exporter_unavailable_spans_not_exported",
             endpoint=endpoint,
             hint="install opentelemetry-exporter-otlp-proto-http to enable real OTLP export",
         )
+
+
+def tool_outcome(content: str, is_error: bool) -> str:
+    """One word for what the guardrail layer did with a tool result, for span
+    attributes and dashboards. Reads only flags, never values: no patient
+    data ever reaches a span."""
+    if content.startswith("<untrusted_data>"):
+        return "untrusted_wrapped"
+    try:
+        payload = json.loads(content)
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        if payload.get("refused"):
+            return "refused"
+        if payload.get("withheld"):
+            return "withheld"
+        if payload.get("pending_approval"):
+            return "pending_approval"
+        if payload.get("suppressed_groups") or (payload.get("guardrails") or {}).get("suppressed_cells"):
+            return "suppressed"
+    return "error" if is_error else "ok"
 
 
 def get_tracer():

@@ -122,6 +122,31 @@ as advisory.
 
 ![Model vs range rule](docs/eda/model_vs_range_rule.png)
 
+**Observability: one dashboard for human work, guardrails and quality.**
+OpenTelemetry carries traces and metrics from the agent to a local
+Collector, then Prometheus and Jaeger, with Grafana on top; all free, in
+Docker. The metrics are computed from the same records as the human-work
+report (audit log, approvals, golden and model reports), so the dashboard
+can't disagree with them. Below it is running on **demo traffic**: 27
+requests driven through the real orchestrator and guardrails with scripted
+tool choices (`scripts/demo_traffic.py`), not real usage. The golden-set
+and anomaly panels are the real measured results.
+
+![Grafana dashboard](docs/images/grafana_dashboard.png)
+
+```bash
+docker compose --profile observability up -d          # Collector, Prometheus, Jaeger, Grafana
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 uv run python scripts/demo_traffic.py --reset
+uv run python -m agent.telemetry --audit-log-path data/state/demo/audit_log.jsonl \
+    --state-path data/state/demo/pipeline_state.json    # then open http://localhost:3000
+```
+
+Traces: every request is an `agent.request` span with one `agent.tool`
+span per tool call, tagged with the guardrail outcome (`refused`,
+`withheld`, `suppressed`, `pending_approval`). Spans never carry the
+request text or results. Moving to Datadog, Dynatrace or Grafana Cloud is
+an exporter in `observability/otel-collector.yaml`, not a code change.
+
 ### Flows, as pictures
 
 Data flow:
@@ -169,6 +194,10 @@ flowchart TD
     LAKE --> OUT
     FB --> OUT
     OUT --> U
+
+    AUD --> OBS["Observability<br/>OpenTelemetry -> Collector -> Prometheus + Jaeger -> Grafana"]
+    R -.->|"traces"| OBS
+    OBS --> U
 
     classDef planned stroke-dasharray: 5 5
     class BRICKS planned
@@ -278,7 +307,7 @@ databricks-agentic-de/
 │   ├── comparisons/                # Genie golden-set results (results/) + Agent Bricks / Vertex AI plans
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
-├── tests/                          # mocked Anthropic client, zero network calls, 376 tests
+├── tests/                          # mocked Anthropic client, zero network calls, 385 tests
 ├── .github/workflows/              # ci.yml (lint+test), bundle-validate.yml (Databricks-gated)
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
@@ -799,6 +828,11 @@ suite mocks this) and other optional configuration.
 |---|---|
 | `uv sync --extra dev` | Install runtime + dev dependencies |
 | `docker compose up -d` | Start the local Redpanda broker + console |
+| `docker compose --profile observability up -d` | Start the OpenTelemetry Collector, Prometheus (:9090), Jaeger (:16686) and Grafana (:3000) |
+| `uv run python -m agent.telemetry` | Export the human-work, guardrail and quality metrics over OTLP every 15 s (`--once` to export once) |
+| `uv run python scripts/demo_traffic.py --reset` | Drive demo requests through the real orchestrator and guardrails (scripted tool choices, no API cost) into `data/state/demo/` |
+| `uv run python scripts/build_grafana_dashboard.py` | Regenerate the Grafana dashboard JSON |
+| `uv run --no-project --with reportlab --with python-docx --with pypdfium2 python scripts/build_workflow_doc.py` | Rebuild `docs/workflow_and_tech_stack.pdf` and `.docx` |
 | `uv run python -m simulator.producer --patients 1000 --duration 60` | Publish a live patient-events stream to Kafka/Redpanda |
 | `uv run python -m simulator.autoloader_feed --interval 30 --batches 5` | Drop provider-roster JSON batch files into the landing directory |
 | `uv run python -m simulator.file_feed --patients 200 --duration 600` | Write simulated patient events as JSON-lines files for the free-trial `files` ingest source (no Kafka needed) |
@@ -806,7 +840,7 @@ suite mocks this) and other optional configuration.
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
 | `uv run orchestrator_healthcheck` | One scheduled-style DE-mode health check (needs `ANTHROPIC_API_KEY`); exit 0 healthy, 1 agent unavailable, 2 escalated |
-| `uv run pytest` | Run the full test suite (376 tests, zero network calls) |
+| `uv run pytest` | Run the full test suite (385 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
 | `databricks bundle validate` | Validate the Asset Bundle against a real workspace (Databricks-only) |
@@ -905,7 +939,7 @@ live infrastructure, or pure planning with no implementation at all
 | DuckDB-backed local Gold stand-in (`agent/tools/data_query.py`) | Complete |
 | Live-workspace DA queries — SQL Statement Execution API against `healthcare_agentic_de.gold` (`agent/databricks_client.py`, `data_query.py`, `metrics.py`) | Runs - the golden set ran `compute_metric` and its truth SQL against the trial workspace's serverless warehouse (about 1.3 s per metric). No-op unless `DATABRICKS_HOST`/`DATABRICKS_TOKEN`/`DATABRICKS_WAREHOUSE_ID` are set |
 | Live-workspace DE tools — expectation metrics, pipeline status, restart via the Pipelines API (`agent/tools/pipeline_health_live.py`) | Stubbed — tested against a mocked transport only; never run against a real workspace. `detect_schema_drift`/`quarantine_bad_records` have no live equivalent and return an escalate-instead error; `notify_and_page` has no paging integration yet |
-| Observability tracing — Langfuse (LLM calls), OpenTelemetry (infra) | Complete (no-op unless configured; real export not exercised against a live backend here) |
+| Observability — OpenTelemetry traces (`agent.request` / `agent.tool` spans) and metrics (`agent/telemetry.py`) → Collector → Prometheus + Jaeger → Grafana (`observability/`, `docker-compose.yml` profile `observability`) | Runs locally - exercised end to end in Docker on demo traffic: 16 metrics in Prometheus, request traces in Jaeger, dashboard in Grafana. Not yet fed by real usage or the Lakeflow event log. Langfuse (LLM calls) remains no-op unless configured |
 | GCP Secret Manager integration (`agent/secrets.py`) | Complete (no-op unless `GCP_PROJECT_ID` is set) |
 | Scheduled DE health-check job (`agent/healthcheck.py`, `resources/workflows.yml:agent_pipeline_healthcheck`) | Partial — CLI tested locally, and the built wheel was installed into a clean venv and its entry point, MCP server, and ONNX model exercised from there; the job itself has never run on Databricks. Needs a `healthcare_agentic_de` secret scope and the `ops.agent_state` volume first |
 | Real-time problem catalog + `lookup_problem` tool (`agent/knowledge/problem_catalog.yaml`, `agent/tools/problem_catalog.py`) | Complete - 104 problems with expected response and autonomy level; matching tested on hand-written incident descriptions (not an independent benchmark) |
@@ -927,7 +961,7 @@ live infrastructure, or pure planning with no implementation at all
 ## Testing
 
 ```bash
-uv run pytest            # full suite: 376 tests, ~30s, zero network calls
+uv run pytest            # full suite: 385 tests, ~55s, zero network calls
 uv run pytest -q         # quiet output
 uv run pytest tests/test_masking_guard.py tests/test_prompt_injection_guard.py  # the two core guardrail proofs
 uv run ruff check .      # lint
@@ -969,6 +1003,7 @@ citation, and the swap-in path if you want to build against it directly.
 - [`docs/architecture.md`](docs/architecture.md) — full design rationale for every flow above, plus the complete guardrail table with implementing-file/test pointers.
 - [`docs/flows/guardrails.md`](docs/flows/guardrails.md) — escalation ceiling, kill switch, audit trail, and behavioral anomaly detection in detail.
 - [`docs/agent_problem_catalog.pdf`](docs/agent_problem_catalog.pdf) — 104 real-time DE/DA problems on this Databricks stack (pipelines, governance, overload, outages, timestamps, data content, changes to production, analyst SQL), how the agent should handle each, its repo status, and the agent training/eval plan. Rebuild with `uv run --no-project --with reportlab --with pyyaml python scripts/build_problem_catalog.py`.
+- [`docs/workflow_and_tech_stack.pdf`](docs/workflow_and_tech_stack.pdf) (also [`.docx`](docs/workflow_and_tech_stack.docx)) — the eight workflows (data, analyst question, incident, approval and earned autonomy, deploy, measurement, observability, development), tech stack with versions and status, guardrails, next steps. Built by `scripts/build_workflow_doc.py`.
 - [`docs/eda/`](docs/eda/README.md) — EDA of the landed stream and the anomaly-model evaluation.
 - [`docs/comparisons/`](docs/comparisons/) — Genie golden-set results and findings; Agent Bricks and Vertex AI evaluation plans (pending).
 - [`docs/restructure-proposal.md`](docs/restructure-proposal.md) — optional layout suggestions surfaced while writing this documentation; not applied.

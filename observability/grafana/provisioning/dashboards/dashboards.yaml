@@ -1,0 +1,9 @@
+apiVersion: 1
+
+providers:
+  - name: agentic-de
+    folder: Agentic DE
+    type: file
+    disableDeletion: true
+    options:
+      path: /var/lib/grafana/dashboards

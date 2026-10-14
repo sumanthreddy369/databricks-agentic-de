@@ -58,7 +58,7 @@ from typing import Literal
 
 import structlog
 
-from agent import autonomy
+from agent import autonomy, otel
 from agent.llm import Claude, ToolResult
 from agent.mcp_bridge import MCPToolBridge, get_default_bridge
 from agent.prompts import MODE_ROUTER_PROMPT, SYSTEM_PROMPT_DA, SYSTEM_PROMPT_DE
@@ -352,6 +352,18 @@ class OrchestratorAgent:
         self._current_mode: str = "unknown"
 
     def handle(self, request: str, mode: Literal["auto", "de", "da"] = "auto") -> OrchestratorResult:
+        # One trace per request; tool calls nest under it (see _dispatch).
+        # Attributes are ids, counts and outcomes - never the request text.
+        with otel.get_tracer().start_as_current_span("agent.request") as span:
+            result = self._handle(request, mode)
+            span.set_attribute("agent.mode", result.mode)
+            span.set_attribute("agent.request_id", self._request_id or "")
+            span.set_attribute("agent.tool_calls", len(result.tool_calls))
+            span.set_attribute("agent.pending_approvals", len(result.pending_approvals))
+            span.set_attribute("agent.degraded", result.answer == AGENT_UNAVAILABLE_ANSWER)
+            return result
+
+    def _handle(self, request: str, mode: Literal["auto", "de", "da"]) -> OrchestratorResult:
         resolved_mode: Literal["de", "da"] = self._route(request) if mode == "auto" else mode
         self._current_mode = resolved_mode
         self._request_id = f"req_{uuid.uuid4().hex[:12]}"
@@ -419,6 +431,14 @@ class OrchestratorAgent:
             return "da"
 
     def _dispatch(self, tool_name: str, tool_input: dict) -> ToolResult:
+        with otel.get_tracer().start_as_current_span("agent.tool") as span:
+            result = self._dispatch_guarded(tool_name, tool_input)
+            span.set_attribute("tool.name", tool_name)
+            span.set_attribute("tool.outcome", otel.tool_outcome(result.content, result.is_error))
+            span.set_attribute("agent.request_id", self._request_id or "")
+            return result
+
+    def _dispatch_guarded(self, tool_name: str, tool_input: dict) -> ToolResult:
         self._tool_calls.append(tool_name)
 
         if tool_name == "query_gold_table":

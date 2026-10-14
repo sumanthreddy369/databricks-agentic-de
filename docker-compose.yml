@@ -26,3 +26,56 @@ services:
       KAFKA_BROKERS: redpanda:29092
     ports:
       - "8080:8080"
+
+  # --- Observability (profile "observability"): OpenTelemetry Collector ->
+  # Prometheus + Jaeger -> Grafana. Start with:
+  #   docker compose --profile observability up -d
+  # Grafana http://localhost:3000 (anonymous viewer), Prometheus :9090, Jaeger :16686.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    container_name: otel-collector
+    profiles: ["observability"]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      - jaeger
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: prometheus
+    profiles: ["observability"]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - otel-collector
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: jaeger
+    profiles: ["observability"]
+    ports:
+      - "16686:16686"
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: grafana
+    profiles: ["observability"]
+    environment:
+      # Local, read-only use: no login, viewers only.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/agentic_de.json
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - jaeger

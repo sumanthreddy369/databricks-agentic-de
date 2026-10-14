@@ -48,3 +48,6 @@ Thumbs.db
 
 # Eval run reports (evals/run.py) - real model outputs, not committed.
 evals/reports/
+
+# Demo traffic for the observability stack (scripts/demo_traffic.py)
+data/state/demo/
