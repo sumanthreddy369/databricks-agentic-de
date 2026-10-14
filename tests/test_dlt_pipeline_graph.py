@@ -17,6 +17,7 @@ correct, that column names line up at runtime, or that Unity Catalog accepts
 the masks — only a real pipeline run can show that.
 """
 
+import re
 import runpy
 import sys
 import types
@@ -51,6 +52,7 @@ class FakeDlt(types.ModuleType):
         super().__init__("dlt")
         self.datasets: dict[str, Dataset] = {}
         self.duplicates: list[str] = []
+        self.constraints: list[tuple[str, str, str]] = []  # (dataset fn, expectation, SQL)
         self._current: Dataset | None = None
 
     def _register(self, ds: Dataset) -> None:
@@ -74,9 +76,10 @@ class FakeDlt(types.ModuleType):
         return self._define("view", name, **kwargs)
 
     def _expect(self, action):
-        def factory(name, _constraint):
+        def factory(name, constraint):
             def decorator(fn):
                 fn._expectations = {**getattr(fn, "_expectations", {}), name: action}
+                self.constraints.append((fn.__name__, name, constraint))
                 return fn
 
             return decorator
@@ -256,3 +259,18 @@ def test_encounter_and_vitals_consumers_read_the_contract_checked_stream(pipelin
     carrier = next(ds.name for ds in graph.datasets.values() if "known_event_type" in ds.expectations)
     direct_bronze_readers = {ds.name for ds in graph.datasets.values() if "bronze_patient_events" in ds.reads}
     assert direct_bronze_readers == {carrier}
+
+
+def test_expectations_reference_output_columns_not_nested_fields(pipelines):
+    """DLT evaluates an expectation against the dataset's OUTPUT columns.
+    Bronze and Silver flatten their structs, so a constraint like
+    `payload.event_id IS NOT NULL` can't resolve - the first real pipeline run
+    failed exactly this way. Constraints must name flat columns."""
+    nested = re.compile(r"\b[a-z_]+\.[a-z_]+\b")
+    offenders = [
+        (fn, name, sql)
+        for graph in pipelines.values()
+        for fn, name, sql in graph.constraints
+        if nested.search(sql)
+    ]
+    assert offenders == []

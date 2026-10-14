@@ -1,5 +1,6 @@
 # Databricks Asset Bundle job (Workflow) definitions.
-# Not deployed/validated against a real workspace in this environment.
+# reference_data_hourly is deployed to the dev target (the GCP trial
+# workspace); its schedule is paused in development mode.
 resources:
   jobs:
     reference_data_hourly:
@@ -12,66 +13,78 @@ resources:
           pipeline_task:
             pipeline_id: ${resources.pipelines.reference_data_pipeline.id}
 
-    # Runs agent/orchestrator.py in DE ("pipeline health") mode on a
-    # schedule so the agent proactively checks/self-heals the streaming
-    # pipeline even with no human watching. Entry point:
-    # agent/healthcheck.py (the `orchestrator_healthcheck` console script in
-    # the wheel built by databricks.yml's `agent_wheel` artifact). Never
-    # deployed or run against a real workspace in this environment.
-    #
-    # Exit codes (see agent/healthcheck.py): 0 healthy, 1 agent unavailable,
-    # 2 escalated via notify_and_page. notify_and_page has no paging
-    # integration yet, so a failed run plus `email_notifications.on_failure`
-    # is how an escalation actually reaches a human.
-    #
-    # One-time setup before the first run (not automated here):
-    #   databricks secrets create-scope healthcare_agentic_de
-    #   databricks secrets put-secret healthcare_agentic_de anthropic_api_key
-    #   databricks secrets put-secret healthcare_agentic_de databricks_token
-    # plus the ops schema + agent_state volume from
-    # governance/05_unity_catalog/catalog_and_grants.sql.
-    #
-    # In `mode: development` (the dev target) the bundle deploys this
-    # schedule paused; unpause it deliberately — every run starts a cluster.
-    agent_pipeline_healthcheck:
-      name: agent_pipeline_healthcheck
-      schedule:
-        quartz_cron_expression: "0 */15 * * * ?" # every 15 minutes
-        timezone_id: UTC
-      email_notifications:
-        on_failure:
-          - ${workspace.current_user.userName}
-      job_clusters:
-        - job_cluster_key: agent_single_node
-          new_cluster:
-            spark_version: 15.4.x-scala2.12 # LTS, Python 3.11 (pyproject requires >=3.11)
-            node_type_id: n2-highmem-4 # GCP node type
-            num_workers: 0
-            data_security_mode: SINGLE_USER # Unity Catalog volume access
-            spark_conf:
-              spark.databricks.cluster.profile: singleNode
-              spark.master: "local[*, 4]"
-            custom_tags:
-              ResourceClass: SingleNode
-            spark_env_vars:
-              ANTHROPIC_API_KEY: "{{secrets/healthcare_agentic_de/anthropic_api_key}}"
-              DATABRICKS_HOST: ${workspace.host}
-              DATABRICKS_TOKEN: "{{secrets/healthcare_agentic_de/databricks_token}}"
-              # Pipeline IDs are resolved by the bundle at deploy time, so the
-              # agent's DE tools hit the live Pipelines API
-              # (agent/tools/pipeline_health_live.py).
-              DATABRICKS_PIPELINE_IDS: >-
-                {"streaming_patient_pipeline": "${resources.pipelines.streaming_patient_pipeline.id}",
-                "reference_data_pipeline": "${resources.pipelines.reference_data_pipeline.id}"}
-              # Kill switch, escalation-ceiling counters, incidents, and the
-              # audit trail must survive between runs on ephemeral clusters.
-              PIPELINE_STATE_PATH: /Volumes/healthcare_agentic_de/ops/agent_state/pipeline_state.json
-              AUDIT_LOG_PATH: /Volumes/healthcare_agentic_de/ops/agent_state/audit_log.jsonl
-      tasks:
-        - task_key: run_de_healthcheck
-          job_cluster_key: agent_single_node
-          python_wheel_task:
-            package_name: databricks_agentic_de
-            entry_point: orchestrator_healthcheck
-          libraries:
-            - whl: ../dist/*.whl
+# The agent healthcheck job is defined for the prod target only, for now.
+# The trial workspace is serverless-only ("Only serverless compute is
+# supported in the workspace" on deploy), and this job still uses a classic
+# job cluster plus secrets injected as cluster environment variables, which
+# serverless jobs don't support. Reworking it for serverless means reading
+# secrets in code (Databricks secrets) and passing the rest as task
+# parameters; until then dev deploys without it. It also can't run without
+# an Anthropic API key in the secret scope.
+targets:
+  prod:
+    resources:
+      jobs:
+        # Runs agent/orchestrator.py in DE ("pipeline health") mode on a
+        # schedule so the agent proactively checks/self-heals the streaming
+        # pipeline even with no human watching. Entry point:
+        # agent/healthcheck.py (the `orchestrator_healthcheck` console script in
+        # the wheel built by databricks.yml's `agent_wheel` artifact). Never
+        # deployed or run against a real workspace in this environment.
+        #
+        # Exit codes (see agent/healthcheck.py): 0 healthy, 1 agent unavailable,
+        # 2 escalated via notify_and_page. notify_and_page has no paging
+        # integration yet, so a failed run plus `email_notifications.on_failure`
+        # is how an escalation actually reaches a human.
+        #
+        # One-time setup before the first run (not automated here):
+        #   databricks secrets create-scope healthcare_agentic_de
+        #   databricks secrets put-secret healthcare_agentic_de anthropic_api_key
+        #   databricks secrets put-secret healthcare_agentic_de databricks_token
+        # plus the ops schema + agent_state volume from
+        # governance/05_unity_catalog/catalog_and_grants.sql.
+        #
+        # In `mode: development` (the dev target) the bundle deploys this
+        # schedule paused; unpause it deliberately — every run starts a cluster.
+        agent_pipeline_healthcheck:
+          name: agent_pipeline_healthcheck
+          schedule:
+            quartz_cron_expression: "0 */15 * * * ?" # every 15 minutes
+            timezone_id: UTC
+          email_notifications:
+            on_failure:
+              - ${workspace.current_user.userName}
+          job_clusters:
+            - job_cluster_key: agent_single_node
+              new_cluster:
+                spark_version: 15.4.x-scala2.12 # LTS, Python 3.11 (pyproject requires >=3.11)
+                node_type_id: n2-highmem-4 # GCP node type
+                num_workers: 0
+                data_security_mode: SINGLE_USER # Unity Catalog volume access
+                spark_conf:
+                  spark.databricks.cluster.profile: singleNode
+                  spark.master: "local[*, 4]"
+                custom_tags:
+                  ResourceClass: SingleNode
+                spark_env_vars:
+                  ANTHROPIC_API_KEY: "{{secrets/healthcare_agentic_de/anthropic_api_key}}"
+                  DATABRICKS_HOST: ${workspace.host}
+                  DATABRICKS_TOKEN: "{{secrets/healthcare_agentic_de/databricks_token}}"
+                  # Pipeline IDs are resolved by the bundle at deploy time, so the
+                  # agent's DE tools hit the live Pipelines API
+                  # (agent/tools/pipeline_health_live.py).
+                  DATABRICKS_PIPELINE_IDS: >-
+                    {"streaming_patient_pipeline": "${resources.pipelines.streaming_patient_pipeline.id}",
+                    "reference_data_pipeline": "${resources.pipelines.reference_data_pipeline.id}"}
+                  # Kill switch, escalation-ceiling counters, incidents, and the
+                  # audit trail must survive between runs on ephemeral clusters.
+                  PIPELINE_STATE_PATH: /Volumes/healthcare_agentic_de/ops/agent_state/pipeline_state.json
+                  AUDIT_LOG_PATH: /Volumes/healthcare_agentic_de/ops/agent_state/audit_log.jsonl
+          tasks:
+            - task_key: run_de_healthcheck
+              job_cluster_key: agent_single_node
+              python_wheel_task:
+                package_name: databricks_agentic_de
+                entry_point: orchestrator_healthcheck
+              libraries:
+                - whl: ../dist/*.whl

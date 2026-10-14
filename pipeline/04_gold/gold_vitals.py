@@ -1,13 +1,19 @@
-"""Databricks-only DLT gold step. Not executed in this environment.
+"""Lakeflow (DLT) gold step. Ran successfully on the GCP trial workspace.
 
 `fct_vitals` is a streaming passthrough of Silver's append-only vitals (read
 with `read_stream`, so each update only processes new readings instead of
-recomputing the whole time series). `gold_live_vitals_by_unit` is the proof point that "gold tables
-update continuously" is true end-to-end, not just Bronze/Silver: it's a
-genuine streaming aggregate — average heart rate and a count of out-of-range
-readings, windowed over the trailing 15 minutes and grouped by unit — backed
-by the same DLT continuous pipeline, so it advances as new vitals events
-arrive with no batch job in between.
+recomputing the whole time series).
+
+`gold_live_vitals_by_unit` - average heart rate and out-of-range count per
+unit in 15-minute event-time windows - is a materialized view, recomputed on
+every pipeline update (continuously, on a continuous pipeline). It used to be
+a streaming append-mode aggregate. The first real run showed why that's
+wrong for a "live" table: a streaming window is only emitted once the
+watermark passes its end, so the current window - the one clinicians care
+about - never appears, and a 10-minute batch produced zero rows. As a
+materialized view, closed windows are exact and the latest window shows what
+has arrived so far; readers must treat the newest window as still filling
+(problem catalog O5).
 
 Both are published into `common.contracts.GOLD_SCHEMA` by fully-qualified
 name — see gold_encounters.py's docstring for why.
@@ -41,7 +47,10 @@ def fct_vitals():
 
 @dlt.table(
     name=f"{GOLD_SCHEMA}.gold_live_vitals_by_unit",
-    comment="Streaming aggregate: avg heart rate + out-of-range count per unit, trailing 15-minute window.",
+    comment=(
+        "Avg heart rate + out-of-range count per unit per 15-minute event-time window. "
+        "The newest window may still be filling."
+    ),
 )
 def gold_live_vitals_by_unit():
     # Each reading is attributed to the unit the patient was in WHEN IT WAS
@@ -50,12 +59,7 @@ def gold_live_vitals_by_unit():
     # in the ED into the ICU once the patient is transferred). Left join, so
     # a reading that arrives before its admit event lands in UNASSIGNED
     # instead of silently disappearing from the aggregate.
-    vitals = (
-        dlt.read_stream("silver_fct_vitals")
-        .filter("itemid = 'heart_rate'")
-        .withWatermark("event_ts", "15 minutes")
-        .alias("v")
-    )
+    vitals = dlt.read("silver_fct_vitals").filter("itemid = 'heart_rate'").alias("v")
     history = dlt.read("silver_fct_encounter_history").select(
         "encounter_id", "unit", F.col("__START_AT").alias("valid_from"), F.col("__END_AT").alias("valid_to")
     ).alias("h")

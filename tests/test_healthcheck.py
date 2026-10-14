@@ -119,9 +119,10 @@ def test_entry_point_named_by_the_job_is_declared_in_the_wheel():
     """resources/workflows.yml runs `entry_point: orchestrator_healthcheck`;
     that name must exist as a console script pointing at healthcheck.main."""
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
-    job = yaml.safe_load((REPO_ROOT / "resources" / "workflows.yml").read_text())["resources"]["jobs"][
-        "agent_pipeline_healthcheck"
-    ]
+    # Defined for the prod target only until it's reworked for serverless
+    # (see the note in resources/workflows.yml).
+    workflows = yaml.safe_load((REPO_ROOT / "resources" / "workflows.yml").read_text())
+    job = workflows["targets"]["prod"]["resources"]["jobs"]["agent_pipeline_healthcheck"]
     [task] = job["tasks"]
 
     entry_point = task["python_wheel_task"]["entry_point"]

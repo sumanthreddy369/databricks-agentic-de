@@ -16,8 +16,8 @@ from pyspark.sql import functions as F
     name="bronze_patient_events",
     comment="Flattened patient_events payload, one row per raw Kafka message. Never drops rows.",
 )
-@dlt.expect("has_event_id", "payload.event_id IS NOT NULL")
-@dlt.expect("has_event_type", "payload.event_type IS NOT NULL")
+@dlt.expect("has_event_id", "event_id IS NOT NULL")
+@dlt.expect("has_event_type", "event_type IS NOT NULL")
 def bronze_patient_events():
     raw = dlt.read_stream("raw_patient_events")
     return raw.select(
