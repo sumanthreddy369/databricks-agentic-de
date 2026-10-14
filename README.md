@@ -29,9 +29,15 @@ uncontrolled access to patient data.** Concretely:
 **Status: in development.** The glue-and-guardrail layer, simulator, MCP
 tool layer and ML lifecycle run and are tested locally.
 
-The connections to Genie and the live workspace are tested only against
-mocked APIs. The Databricks/GCP platform code (pipelines, Unity Catalog SQL,
-Asset Bundle, Terraform) is written but has never run on a real workspace.
+**Running on Databricks:** both pipelines are deployed to a GCP trial
+workspace (dev target, serverless, triggered) and have run end to end on
+103,301 synthetic events. The layers reconcile, and Unity Catalog masks
+`full_name` / `mrn` in Gold (1,388 of 1,388 rows redacted, even for the
+workspace owner).
+
+**Still mock-tested or not run:** the agent's connections to Genie and the
+live APIs are tested only against mocks. The agent healthcheck job, the
+unit row filter for restricted groups, Terraform and Cloud Run haven't run.
 No real-model eval results or Genie comparison numbers exist yet. See
 [Feature status](#feature-status) for each component, and
 [`docs/plan.md`](docs/plan.md) for the plan and phases.
@@ -808,9 +814,9 @@ live infrastructure, or pure planning with no implementation at all
 | Scenario evals (`evals/`) | Partial - harness, graders, and 14 scenarios tested with a scripted model; **not yet run against the real model**, so no pass rate exists |
 | CI — lint + test (`.github/workflows/ci.yml`) | Complete |
 | CI — bundle validate (`.github/workflows/bundle-validate.yml`) | Complete (its skip path is what actually runs here; `databricks bundle validate` itself is untested) |
-| DLT medallion pipeline (`pipeline/`) | Partial — never run; only resolves on a real Databricks cluster. Its dataset graph (names, reads, schema placement) is checked statically by `tests/test_dlt_pipeline_graph.py`; the Spark transformations are not |
-| Unity Catalog grants + masking/row-filter SQL (`governance/05_unity_catalog/*.sql`, excluding BigQuery federation) | Partial — structurally correct, never run against a real metastore |
-| Databricks Asset Bundle (`databricks.yml`, `resources/*.yml`) | Partial — structurally correct, never deployed |
+| Lakeflow (DLT) medallion pipeline (`pipeline/`) | Runs - deployed to the GCP trial workspace (dev, serverless, triggered) and run end to end on synthetic data; layer counts reconcile. Dataset graph also checked statically by `tests/test_dlt_pipeline_graph.py`. Not yet run continuously or on a Kafka source |
+| Unity Catalog masks + row filters (`governance/05_unity_catalog/`, declared in `pipeline/04_gold/`) | Partial - column masks verified on the workspace (all names/MRNs redacted in Gold); row filter attached but not tested with a restricted group; grants and account groups not applied (`CREATE GROUP` isn't how account groups are created) |
+| Databricks Asset Bundle (`databricks.yml`, `resources/*.yml`) | Runs - deployed to the dev target; the agent healthcheck job is prod-only until it's reworked for serverless (the trial workspace is serverless-only) |
 | Databricks Vector Search knowledge tool (`agent/tools/knowledge_search.py`) | Stubbed — real graceful-degradation code path, never queried a live index |
 | Lakehouse Federation to BigQuery example | Stubbed — illustrative SQL, never run |
 | Terraform GCP infrastructure (`infra/terraform/`) | Stubbed — structurally correct, `terraform apply` never run |

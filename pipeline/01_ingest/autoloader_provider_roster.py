@@ -6,8 +6,13 @@ changes) that our own simulator drops as JSON batch files into a landing
 directory (see simulator/autoloader_feed.py). Autoloader is the right tool
 here (vs. Kafka) because this data is batchy and file-shaped, not an event
 stream — using cloudFiles avoids re-scanning the whole landing directory on
-every trigger and evolves the schema automatically as new roster columns
-appear.
+every trigger.
+
+The schema is the explicit contract (pipeline/common/schemas.py), so schema
+evolution is `rescue`: a column the contract doesn't know lands in
+`_rescued_data` instead of being dropped or breaking the stream. (Autoloader
+rejects `addNewColumns` when a schema is given - the first real run failed
+on exactly that.)
 
 Target cloud is GCP: `PROVIDER_LANDING_PATH` defaults to a `gs://` bucket path
 (Autoloader's `cloudFiles` reads GCS natively). A Unity Catalog Volume path
@@ -42,7 +47,7 @@ def raw_provider_roster():
     return (
         spark.readStream.format("cloudFiles")
         .option("cloudFiles.format", "json")
-        .option("cloudFiles.schemaEvolutionMode", "addNewColumns")
+        .option("cloudFiles.schemaEvolutionMode", "rescue")
         .schema(PROVIDER_ROSTER_SCHEMA)
         .load(PROVIDER_LANDING_PATH)
     )
