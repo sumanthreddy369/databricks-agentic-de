@@ -122,3 +122,46 @@ dlt.apply_changes(
     ignore_null_updates=True,
     stored_as_scd_type=1,
 )
+
+
+@dlt.table(
+    name="silver_patient_admissions",
+    comment="Append-only: one row per admission with the demographic snapshot it carried (source for M2 checks).",
+)
+def silver_patient_admissions():
+    events = dlt.read_stream("silver_contract_checked_events")
+    return events.filter("event_type = 'admitted' AND patient IS NOT NULL").select(
+        "patient_id",
+        "encounter_id",
+        "event_ts",
+        F.col("patient.full_name").alias("full_name"),
+        F.col("patient.birth_date").alias("birth_date"),
+        F.col("patient.gender").alias("gender"),
+    )
+
+
+@dlt.table(
+    name="silver_patient_identity_conflicts",
+    comment=(
+        "Data-quality check (problem catalog M2): readmitted patient_ids whose name or birth date changed "
+        "between admissions. Counts only - no names. A data steward decides; records are never merged "
+        "automatically."
+    ),
+)
+@dlt.expect("one_identity_per_patient_id", "names = 1 AND birth_dates = 1")
+def silver_patient_identity_conflicts():
+    # Batch read of the admissions table: an aggregate over all of a patient's
+    # admissions, downstream of the contract gate.
+    return (
+        dlt.read("silver_patient_admissions")
+        .groupBy("patient_id")
+        .agg(
+            F.countDistinct("encounter_id").alias("admissions"),
+            F.countDistinct("full_name").alias("names"),
+            F.countDistinct("birth_date").alias("birth_dates"),
+            F.countDistinct("gender").alias("genders"),
+            F.min("event_ts").alias("first_admitted"),
+            F.max("event_ts").alias("last_admitted"),
+        )
+        .filter("admissions > 1")
+    )

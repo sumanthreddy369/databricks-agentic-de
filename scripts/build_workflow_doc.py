@@ -155,7 +155,7 @@ W5 = [26, 62, 70, 75, 34]
 
 STACK = [
     ["Layer", "Technology", "Version", "What it does here", "Repo path", "Status"],
-    ["Language / tooling", "Python, uv, ruff, pytest", "Python >=3.11; ruff 0.16.8; pytest 9.1.1", "uv-only package management, lint, 427 tests with zero network calls", "pyproject.toml, uv.lock, tests/", "Tested locally - passing in CI"],
+    ["Language / tooling", "Python, uv, ruff, pytest", "Python >=3.11; ruff 0.16.8; pytest 9.1.1", "uv-only package management, lint, 429 tests with zero network calls", "pyproject.toml, uv.lock, tests/", "Tested locally - passing in CI"],
     ["Data source", "Patient-event simulator (Synthea / MIMIC-IV-shaped, synthetic)", "-", "Admit / transfer / discharge + 6 vitals; Kafka publisher or JSON-lines files", "simulator/", "Runs - 103,301 events generated and ingested"],
     ["Transport (free trial)", "Autoloader over a Unity Catalog volume", "-", "Reads JSON-lines files; no extra service", "simulator/file_feed.py, pipeline/01_ingest/", "Runs on Databricks"],
     ["Transport (prod)", "Kafka / Redpanda", "confluent-kafka 2.15.1", "Production event stream; local broker via Docker", "docker-compose.yml, simulator/producer.py", "Tested locally - not run on Databricks"],
@@ -211,7 +211,7 @@ REPO_MAP = [
     ["observability/", "OTel Collector, Prometheus, Grafana provisioning and dashboard"],
     ["scripts/", "eda_landing, demo_traffic, build_* (Genie space, dashboard, images, docs), stop_everything"],
     ["docs/", "plan, architecture, eda/, comparisons/ (Genie results), images/, this document"],
-    ["tests/", "427 tests, one file per concern, zero network calls"],
+    ["tests/", "429 tests, one file per concern, zero network calls"],
 ]
 
 NEXT = [
@@ -467,7 +467,7 @@ def story(fx):
         [
             ["Change code", "glue or guardrail only"],
             ["ruff check", "lint"],
-            ["pytest", "427 tests, no network,", "no API key"],
+            ["pytest", "429 tests, no network,", "no API key"],
             ["Guardrail tests", "masking, injection, MCP", "when core files change"],
             ["Commit + push", "master"],
             ["GitHub Actions CI", "lint + tests"],

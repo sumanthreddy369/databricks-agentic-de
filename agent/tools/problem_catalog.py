@@ -118,7 +118,14 @@ def _stem(token: str) -> str:
 
 
 def _tokens(text: str) -> list[str]:
-    return [_stem(t) for t in re.findall(r"[a-z0-9_]+", text.lower()) if len(t) >= 2 and t not in _STOPWORDS]
+    # Identifiers (expectation and table names, e.g. one_identity_per_patient_id)
+    # count as themselves and as their words, since health checks report them by name.
+    words = []
+    for token in re.findall(r"[a-z0-9_]+", text.lower()):
+        words.append(token)
+        if "_" in token:
+            words.extend(part for part in token.split("_") if part)
+    return [_stem(t) for t in words if len(t) >= 2 and t not in _STOPWORDS]
 
 
 @lru_cache(maxsize=1)

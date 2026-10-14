@@ -118,3 +118,9 @@ def test_orchestrator_routes_lookup_through_the_mcp_bridge(tmp_path):
 
     assert calls == [("lookup_problem", {"query": "kafka broker is down"})]
     assert json.loads(result.content)["matches"][0]["id"] == "K1"
+
+
+def test_expectation_and_table_names_match_their_problem():
+    """Health checks report failures by identifier; the words inside it count."""
+    query = "one_identity_per_patient_id expectation failing in silver_patient_identity_conflicts"
+    assert search(query)[0]["id"] == "M2"

@@ -321,7 +321,7 @@ databricks-agentic-de/
 │   ├── comparisons/                # Genie golden-set results (results/) + Agent Bricks / Vertex AI plans
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
-├── tests/                          # mocked Anthropic client, zero network calls, 427 tests
+├── tests/                          # mocked Anthropic client, zero network calls, 429 tests
 ├── .github/workflows/              # ci.yml (lint+test), bundle-validate.yml (Databricks-gated)
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
@@ -854,7 +854,7 @@ suite mocks this) and other optional configuration.
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
 | `uv run orchestrator_healthcheck` | One scheduled-style DE-mode health check (needs `ANTHROPIC_API_KEY`); exit 0 healthy, 1 agent unavailable, 2 escalated |
-| `uv run pytest` | Run the full test suite (427 tests, zero network calls) |
+| `uv run pytest` | Run the full test suite (429 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
 | `databricks bundle validate` | Validate the Asset Bundle against a real workspace (Databricks-only) |
@@ -962,6 +962,7 @@ live infrastructure, or pure planning with no implementation at all
 | CI — lint + test (`.github/workflows/ci.yml`) | Complete |
 | CI — bundle validate (`.github/workflows/bundle-validate.yml`) | Complete (its skip path is what actually runs here; `databricks bundle validate` itself is untested) |
 | Lakeflow (DLT) medallion pipeline (`pipeline/`) | Runs - deployed to the GCP trial workspace (dev, serverless, triggered) and run end to end on synthetic data; layer counts reconcile. Dataset graph also checked statically by `tests/test_dlt_pipeline_graph.py`. Not yet run continuously or on a Kafka source |
+| Patient identity check (`silver_patient_identity_conflicts`, problem catalog M2) | Partial - flags readmitted patient_ids whose name or birth date changed (warn-only; counts, never names; a steward decides). Graph-tested; the EDA found 13 such patients in the landed data. Not yet run on the workspace |
 | Unity Catalog masks + row filters (`governance/05_unity_catalog/`, declared in `pipeline/04_gold/`) | Partial - column masks verified on the workspace (all names/MRNs redacted in Gold); row filter attached but not tested with a restricted group; grants and account groups not applied (`CREATE GROUP` isn't how account groups are created) |
 | Databricks Asset Bundle (`databricks.yml`, `resources/*.yml`) | Runs - deployed to the dev target; the agent healthcheck job is prod-only until it's reworked for serverless (the trial workspace is serverless-only) |
 | Databricks Vector Search knowledge tool (`agent/tools/knowledge_search.py`) | Stubbed — real graceful-degradation code path, never queried a live index |
@@ -976,7 +977,7 @@ live infrastructure, or pure planning with no implementation at all
 ## Testing
 
 ```bash
-uv run pytest            # full suite: 427 tests, ~55s, zero network calls
+uv run pytest            # full suite: 429 tests, ~55s, zero network calls
 uv run pytest -q         # quiet output
 uv run pytest tests/test_masking_guard.py tests/test_prompt_injection_guard.py  # the two core guardrail proofs
 uv run ruff check .      # lint

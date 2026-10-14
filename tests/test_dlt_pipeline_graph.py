@@ -274,3 +274,15 @@ def test_expectations_reference_output_columns_not_nested_fields(pipelines):
         if nested.search(sql)
     ]
     assert offenders == []
+
+
+def test_patient_identity_conflicts_are_flagged_not_dropped(pipelines):
+    """Problem catalog M2, found by the EDA (13 readmitted patients changed
+    name and birth date): Silver flags patient_ids with conflicting identities.
+    Warn-only - a steward decides; rows are never dropped or merged - and it
+    sits downstream of the contract gate."""
+    graph = pipelines["streaming_patient_pipeline"]
+    check = graph.datasets["silver_patient_identity_conflicts"]
+    assert check.expectations == {"one_identity_per_patient_id": "warn"}
+    assert check.reads == ["silver_patient_admissions"]
+    assert graph.datasets["silver_patient_admissions"].reads == ["silver_contract_checked_events"]
