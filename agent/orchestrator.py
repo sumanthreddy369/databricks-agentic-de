@@ -58,6 +58,7 @@ from typing import Literal
 
 import structlog
 
+from agent import autonomy
 from agent.llm import Claude, ToolResult
 from agent.mcp_bridge import MCPToolBridge, get_default_bridge
 from agent.prompts import MODE_ROUTER_PROMPT, SYSTEM_PROMPT_DA, SYSTEM_PROMPT_DE
@@ -344,11 +345,15 @@ class OrchestratorAgent:
         self._pending_approvals: list[str] = []
         # Set only while execute_approved() runs a person-approved request.
         self._approved_by: str | None = None
+        # Groups every audit line written while answering one handle() call,
+        # so reports can count requests, not just tool calls.
+        self._request_id: str | None = None
         self._current_mode: str = "unknown"
 
     def handle(self, request: str, mode: Literal["auto", "de", "da"] = "auto") -> OrchestratorResult:
         resolved_mode: Literal["de", "da"] = self._route(request) if mode == "auto" else mode
         self._current_mode = resolved_mode
+        self._request_id = f"req_{uuid.uuid4().hex[:12]}"
         self._tool_calls = []
         self._remediated = False
         self._pending_approvals = []
@@ -566,11 +571,13 @@ class OrchestratorAgent:
         if attempts >= ESCALATION_CEILING:
             return self._force_escalation(table, expectation, attempts)
 
-        if self._needs_approval():
-            return self._queue_for_approval("quarantine_bad_records", {"table": table, "expectation": expectation})
+        class_input = {"table": table, "expectation": expectation}
+        if self._needs_approval("quarantine_bad_records", class_input):
+            return self._queue_for_approval("quarantine_bad_records", class_input)
 
         quarantine_input = {"state_path": str(self.state_path), "table": table, "expectation": expectation}
         result = self.mcp_bridge.dispatch("quarantine_bad_records", quarantine_input)
+        self._demote_if_auto("quarantine_bad_records", class_input, result)
         if not result.is_error:
             self._remediated = True
             # Re-read after quarantine_bad_records's own write so we're
@@ -585,12 +592,12 @@ class OrchestratorAgent:
         if not self._autonomous_remediation_enabled():
             return self._killswitch_refusal("restart_pipeline", tool_input)
 
-        if self._needs_approval():
-            return self._queue_for_approval(
-                "restart_pipeline", {"pipeline_name": tool_input.get("pipeline_name", "")}
-            )
+        class_input = {"pipeline_name": tool_input.get("pipeline_name", "")}
+        if self._needs_approval("restart_pipeline", class_input):
+            return self._queue_for_approval("restart_pipeline", class_input)
 
         result = self.mcp_bridge.dispatch("restart_pipeline", {**tool_input, "state_path": str(self.state_path)})
+        self._demote_if_auto("restart_pipeline", class_input, result)
         if not result.is_error:
             self._remediated = True
         return result
@@ -606,11 +613,27 @@ class OrchestratorAgent:
     # execution time, and the audit line records who approved it. No approve
     # or reject tool is ever offered to the model.
 
-    def _needs_approval(self) -> bool:
+    def _needs_approval(self, tool_name: str, tool_input: dict) -> bool:
+        """A person must approve unless they already did (execute_approved),
+        the whole state file opts out (`remediation_approval: auto`, local
+        demos), or this action class has earned autonomy (agent/autonomy.py)."""
         if self._approved_by is not None:
             return False
         state = pipeline_health.load_state(self.state_path)
-        return state.get("remediation_approval", "required") != "auto"
+        if state.get("remediation_approval", "required") == "auto":
+            return False
+        return autonomy.policy(state, autonomy.action_class(tool_name, tool_input)) != "auto"
+
+    def _demote_if_auto(self, tool_name: str, tool_input: dict, result: ToolResult) -> None:
+        """Earned autonomy is lost on the first failed automatic execution."""
+        if self._approved_by is not None or not result.is_error:
+            return
+        state = pipeline_health.load_state(self.state_path)
+        cls = autonomy.action_class(tool_name, tool_input)
+        if autonomy.policy(state, cls) == "auto":
+            autonomy.demote(state, cls, f"automatic execution failed: {result.content[:200]}")
+            pipeline_health.save_state(self.state_path, state)
+            logger.warning("autonomy_demoted", action_class=cls)
 
     def _queue_for_approval(self, tool_name: str, tool_input: dict) -> ToolResult:
         now = datetime.now(UTC)
@@ -664,6 +687,7 @@ class OrchestratorAgent:
             return request
 
         self._current_mode = "approval"
+        self._request_id = approval_id
         self._approved_by = approved_by.strip()
         try:
             result = self._dispatch(request["tool"], dict(request["input"]))
@@ -687,6 +711,7 @@ class OrchestratorAgent:
         self._close_request(approval_id, "rejected", rejected_by.strip(), reason=reason)
         result = ToolResult(tool_use_id="", content=json.dumps({"ok": True, "rejected": approval_id}))
         self._current_mode = "approval"
+        self._request_id = approval_id
         self._append_audit_log(
             "approval_rejected",
             {"approval_id": approval_id, "rejected_by": rejected_by.strip(), "reason": reason},
@@ -779,6 +804,7 @@ class OrchestratorAgent:
         """
         entry = {
             "ts": datetime.now(UTC).isoformat(),
+            "request_id": self._request_id,
             "mode": self._current_mode,
             "tool": tool_name,
             "input": tool_input,

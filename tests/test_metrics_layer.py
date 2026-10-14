@@ -17,6 +17,7 @@ import pytest
 from agent.orchestrator import DA_TOOLS, OrchestratorAgent
 from agent.tools import data_query
 from agent.tools.metrics import compute_metric, load, normalize, render_sql
+from common.contracts import VITAL_ITEM_TYPES
 from scripts.build_genie_space import SPACE_PATH, render
 from simulator import autoloader_feed, domain
 
@@ -46,6 +47,12 @@ INSERT INTO gold_live_vitals_by_unit VALUES
     (TIMESTAMP '2026-10-07 02:15:00', TIMESTAMP '2026-10-07 02:30:00', 'ICU', 90.0, 30, 3000),
     (TIMESTAMP '2026-10-07 02:30:00', TIMESTAMP '2026-10-07 02:45:00', 'ICU', 120.0, 2, 30),
     (TIMESTAMP '2026-10-07 02:15:00', TIMESTAMP '2026-10-07 02:30:00', 'ED', 80.0, 10, 500);
+
+CREATE TABLE fct_vitals (event_id VARCHAR, encounter_id VARCHAR, patient_id VARCHAR, itemid VARCHAR,
+    value DOUBLE, valueuom VARCHAR, event_ts TIMESTAMP);
+INSERT INTO fct_vitals SELECT 'v' || i, 'e' || i, 'p' || (i % 40),
+    CASE WHEN i % 2 = 0 THEN 'spo2' ELSE 'heart_rate' END, 80 + (i % 20), 'x', TIMESTAMP '2026-10-07 02:00:00'
+    FROM range(200) t(i);
 
 CREATE TABLE dim_providers (provider_id VARCHAR, full_name VARCHAR, specialty VARCHAR, npi VARCHAR,
     home_unit VARCHAR, updated_at TIMESTAMP);
@@ -78,7 +85,7 @@ def test_every_metric_is_well_formed():
     layer = load()
     for metric in layer["metrics"].values():
         assert metric["table"] in data_query._ALLOWED_TABLES, metric["id"]
-        assert metric["measure"]["type"] in {"count", "count_distinct", "sum", "weighted_avg"}, metric["id"]
+        assert metric["measure"]["type"] in {"count", "count_distinct", "sum", "avg", "weighted_avg"}, metric["id"]
         for dim in metric.get("dimensions", []):
             assert dim in layer["dimensions"], (metric["id"], dim)
         for key in ("name", "description", "example_question"):
@@ -92,6 +99,7 @@ def test_dimension_values_match_what_the_simulator_produces():
     assert sorted(dims["specialty"]["values"]) == sorted(autoloader_feed._SPECIALTIES)
     assert sorted(dims["region"]["values"]) == sorted(domain._REGIONS)
     assert sorted(dims["gender"]["values"]) == sorted(domain._GENDERS)
+    assert sorted(dims["itemid"]["values"]) == sorted(VITAL_ITEM_TYPES)
 
 
 @pytest.mark.parametrize(
@@ -144,6 +152,8 @@ CASES = [
     ("heart_rate_readings", ["unit"], None, None),
     ("provider_count", ["specialty"], None, None),
     ("patient_count", ["region"], None, None),
+    ("avg_vital_value", ["itemid"], None, None),
+    ("avg_vital_value", None, {"itemid": "oxygen saturation"}, None),
 ]
 
 

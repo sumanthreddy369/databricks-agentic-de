@@ -204,3 +204,112 @@ def test_orchestrator_routes_ask_genie_and_audits_it(tmp_path, monkeypatch):
     entry = json.loads(audit.read_text().splitlines()[-1])
     assert entry["tool"] == "ask_genie"
     assert "Jane Alvarez" not in audit.read_text()
+
+
+def test_provider_counts_are_not_suppressed():
+    """Found by the golden-set run: suppression protects patients, so small
+    provider counts must pass through unchanged."""
+    fake = FakeGenie(
+        sql="SELECT specialty, count(*) AS provider_count FROM gold.dim_providers GROUP BY 1",
+        columns=[("specialty", "STRING"), ("provider_count", "LONG")],
+        rows=[["Cardiology", 4], ["Critical Care", 9]],
+    )
+
+    payload = _payload(ask_genie("How many providers per specialty?", client=_client(fake)))
+
+    assert payload["rows"] == [
+        {"specialty": "Cardiology", "provider_count": 4},
+        {"specialty": "Critical Care", "provider_count": 9},
+    ]
+    assert payload["guardrails"]["suppressed_cells"] == 0
+
+
+def test_small_patient_counts_are_still_suppressed_when_joined_with_providers():
+    fake = FakeGenie(
+        sql=(
+            "SELECT p.specialty, count(*) AS patient_count FROM gold.fct_encounters e "
+            "JOIN gold.dim_providers p ON e.attending_provider_id = p.provider_id GROUP BY 1"
+        ),
+        columns=[("specialty", "STRING"), ("patient_count", "LONG")],
+        rows=[["Cardiology", 4]],
+    )
+
+    payload = _payload(ask_genie("Patients per attending specialty?", client=_client(fake)))
+
+    assert payload["rows"][0]["patient_count"] is None
+
+
+@pytest.mark.parametrize(
+    ("question", "sql", "withheld"),
+    [
+        # Found by the golden-set run: asked about the PICU, Genie answered for the ICU.
+        (
+            "How many patients are currently in the PICU?",
+            "SELECT count(*) AS n FROM gold.fct_encounters WHERE unit = 'ICU'",
+            True,
+        ),
+        (
+            "How many patients are in intensive care?",
+            "SELECT count(*) AS n FROM gold.fct_encounters WHERE unit = 'ICU'",
+            False,
+        ),
+        (
+            "How many patients in the emergency room?",
+            "SELECT count(*) AS n FROM gold.fct_encounters WHERE `unit` = 'ED'",
+            False,
+        ),
+        (
+            "What's the census in med-surg?",
+            "SELECT count(*) AS n FROM gold.fct_encounters WHERE unit = 'MedSurg'",
+            False,
+        ),
+        (
+            "How many patients are admitted?",
+            "SELECT count(*) AS n FROM gold.fct_encounters WHERE status = 'in-progress'",
+            False,
+        ),
+        ("Census by unit?", "SELECT unit, count(*) AS n FROM gold.fct_encounters GROUP BY unit", False),
+    ],
+)
+def test_filters_the_question_never_asked_for_are_withheld(question, sql, withheld):
+    fake = FakeGenie(sql=sql, columns=[("n", "LONG")], rows=[[34]])
+
+    payload = _payload(ask_genie(question, client=_client(fake)))
+
+    assert bool(payload.get("withheld")) is withheld, payload
+
+
+def test_small_count_under_a_generic_alias_is_suppressed_text_included():
+    """Found by golden run 2: Genie aliased COUNT(...) as `value` and wrote
+    "There are **1** distinct patients" - the name heuristic let both through."""
+    fake = FakeGenie(
+        text="There are **1** distinct patients currently admitted in the **ICU** with gender = **nonbinary**.",
+        sql=(
+            "SELECT COUNT(DISTINCT `f`.`patient_id`) AS `value`\n"
+            "FROM `healthcare_agentic_de`.`gold`.`fct_encounters` AS `f`\n"
+            "INNER JOIN `healthcare_agentic_de`.`gold`.`dim_patients` AS `p`\n"
+            "  ON `f`.`patient_id` = `p`.`patient_id`\n"
+            "WHERE `f`.`unit` = 'ICU' AND `p`.`gender` = 'nonbinary'"
+        ),
+        columns=[("value", "LONG")],
+        rows=[[1]],
+    )
+
+    payload = _payload(ask_genie("How many nonbinary patients are in the ICU right now?", client=_client(fake)))
+
+    assert payload["rows"] == [{"value": None, "value_suppressed": True}]
+    assert "**1**" not in payload["answer_text"]
+    assert "too small to report" in payload["answer_text"]
+
+
+def test_averages_under_a_generic_alias_are_not_suppressed():
+    fake = FakeGenie(
+        sql="SELECT AVG(`value`) AS `value` FROM healthcare_agentic_de.gold.fct_vitals WHERE `itemid` = 'spo2'",
+        columns=[("value", "DOUBLE")],
+        rows=[[3]],
+    )
+
+    payload = _payload(ask_genie("What is the average SpO2?", client=_client(fake)))
+
+    assert payload["rows"] == [{"value": 3}]
+    assert payload["guardrails"]["suppressed_cells"] == 0

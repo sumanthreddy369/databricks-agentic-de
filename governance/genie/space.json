@@ -58,13 +58,14 @@
         {
           "id": "cbde2df6a7c89370edc449dc5705d30c",
           "content": [
-            "Metric definitions - use exactly these; they are shared with the project's fallback agent:\n",
+            "Metric definitions - when a question matches one, use exactly this definition; they are shared with the project's fallback agent:\n",
             "* Current census (current_census): Patients currently admitted - encounters whose status is in-progress. Table healthcare_agentic_de.gold.fct_encounters; always filter status = 'in-progress'. Break down only by: unit, encounter_type.\n",
             "* Census at a point in time (census_at_time): Distinct patients admitted (in-progress) at a past moment, from encounter history. fct_encounters only holds current state, so past-time questions must use this. Table healthcare_agentic_de.gold.fct_encounter_history; always filter status = 'in-progress'; needs a point in time: valid_from <= T AND (valid_to IS NULL OR valid_to > T). Break down only by: unit, encounter_type.\n",
             "* Discharged encounters (discharged_encounters): Encounters that have ended in discharge (all discharges in the data). Table healthcare_agentic_de.gold.fct_encounters; always filter status = 'discharged'. Break down only by: unit, encounter_type.\n",
             "* Average heart rate (avg_heart_rate): Average heart rate from the live 15-minute windows, weighted by the number of readings in each window (never the plain average of window averages). The newest window may still be filling. Table healthcare_agentic_de.gold.gold_live_vitals_by_unit. Break down only by: unit, window_start.\n",
             "* Out-of-range heart-rate readings (out_of_range_heart_rate_readings): Heart-rate readings outside the 55-140 bpm clinical alert band. Table healthcare_agentic_de.gold.gold_live_vitals_by_unit. Break down only by: unit, window_start.\n",
             "* Heart-rate readings (heart_rate_readings): Number of heart-rate readings received. Table healthcare_agentic_de.gold.gold_live_vitals_by_unit. Break down only by: unit, window_start.\n",
+            "* Average vital-sign value (avg_vital_value): Average reading of a vital sign (spo2, temp_c, sbp, dbp, resp_rate, heart_rate) over all readings in fct_vitals, after Silver dropped physically impossible values. Table healthcare_agentic_de.gold.fct_vitals. Break down only by: itemid.\n",
             "* Providers (provider_count): Providers on the roster. Table healthcare_agentic_de.gold.dim_providers. Break down only by: specialty, home_unit.\n",
             "* Patients (patient_count): Distinct patients ever admitted. Table healthcare_agentic_de.gold.dim_patients. Break down only by: region, gender.\n",
             "Dimension values - compare with = against these exact values; never LIKE / ILIKE patterns:\n",
@@ -74,6 +75,9 @@
             "* home_unit: Cardiology, ED, ICU, MedSurg, Oncology\n",
             "* region: midwest, northeast, south, west\n",
             "* gender: female, male, nonbinary\n",
+            "* itemid: dbp, heart_rate, resp_rate, sbp, spo2, temp_c (synonyms: 'oxygen saturation' means spo2, 'o2 sat' means spo2, 'pulse' means heart_rate, 'heart rate' means heart_rate, 'respiratory rate' means resp_rate, 'temperature' means temp_c, 'systolic' means sbp, 'diastolic' means dbp)\n",
+            "Questions no metric covers are fine: write SQL against the listed tables. fct_vitals holds every vital-sign reading (itemid values above), not just heart rate.\n",
+            "If a question names a value that isn't in these lists (for example a unit that doesn't exist), say so and don't substitute a different value.\n",
             "Governance:\n",
             "* full_name and mrn are masked by policy and show ***REDACTED***. Never try to reveal, infer or reconstruct them.\n",
             "* Don't report a group that covers fewer than 11 patients; say it is too small to report.\n",
@@ -129,6 +133,17 @@
             "FROM healthcare_agentic_de.gold.dim_providers\n",
             "GROUP BY specialty\n",
             "ORDER BY specialty"
+          ]
+        },
+        {
+          "id": "6b9420e35b32cac5374ceb22cbe65cbf",
+          "question": [
+            "What is the average SpO2 reading?"
+          ],
+          "sql": [
+            "SELECT avg(value) AS value\n",
+            "FROM healthcare_agentic_de.gold.fct_vitals\n",
+            "WHERE itemid = 'spo2'"
           ]
         },
         {

@@ -16,9 +16,10 @@ After Genie answers, before the model or a person sees it
   (common.contracts.MASKED_COLUMNS, any table) is redacted, and any raw value
   from such a column that appears in Genie's text answer is redacted there
   too. This catches a misconfigured UC mask instead of relying on it.
-- Small-cell suppression: count-like columns with values 1-10 are suppressed
-  (MIN_CELL_SIZE). Genie's SQL is free-form, so "count-like" is a name
-  heuristic here, unlike aggregate_gold_table where it's exact.
+- Small-cell suppression: count columns with values 1-10 are suppressed
+  (MIN_CELL_SIZE). A column is a count if Genie's SQL produces it with
+  COUNT(...), or, failing that, if its name looks like one. When anything is
+  suppressed, Genie's text answer is withheld too - it states the number.
 - Size cap on rows; then the orchestrator's injection scan, size guard, and
   audit log apply as for every tool.
 
@@ -44,8 +45,23 @@ _PHI_REQUEST = re.compile(
     re.IGNORECASE,
 )
 _COUNT_LIKE = re.compile(r"(^|_)(count|cnt|num|n|patients|census|total)(_|$)", re.IGNORECASE)
+# `COUNT(...) AS alias` - Genie names aggregates generically (`value`), so the
+# name heuristic alone missed a count of 1 in golden run 2.
+_COUNT_ALIAS = re.compile(r"\bcount\s*\((?:[^()]|\([^()]*\))*\)\s*(?:as\s+)?`?(\w+)`?", re.IGNORECASE)
 _TABLE_REF = re.compile(r"\b(?:from|join)\s+([`\w.]+)", re.IGNORECASE)
 _DISALLOWED_SCHEMAS = ("bronze", "silver", "ops", "information_schema", "system")
+# Gold tables whose rows describe patients. Small-count suppression protects
+# patients, so it applies only when Genie's SQL reads one of these (or when
+# the SQL is unknown). Counting providers is not a re-identification risk -
+# the golden-set run showed suppressing it turned a correct answer
+# ("providers per specialty") into no answer.
+_PATIENT_TABLES = (
+    "dim_patients",
+    "fct_encounters",
+    "fct_encounter_history",
+    "fct_vitals",
+    "gold_live_vitals_by_unit",
+)
 
 
 def _result(payload: dict, *, is_error: bool = False) -> ToolResult:
@@ -65,7 +81,49 @@ def _sql_outside_gold(sql: str | None) -> list[str]:
     return bad
 
 
-def _guard_rows(rows: list[dict]) -> tuple[list[dict], list[str], set[str], int]:
+_EQ_FILTER = re.compile(r"`?(\w+)`?\s*=\s*'([^']*)'")
+
+
+def _filters_not_in_question(question: str, sql: str | None) -> list[str]:
+    """Question/SQL consistency check. For every metrics-layer dimension with
+    a closed value list (unit, specialty, region, ...), an equality filter in
+    Genie's SQL must correspond to something the question said - the value
+    itself as a whole word, or one of its synonyms. Found by the golden-set
+    run: asked about the "PICU", Genie ran `unit = 'ICU'` and answered with
+    the ICU census. `\\bICU\\b` doesn't match inside "PICU", so that's caught.
+    Filters on columns that aren't such dimensions (status, dates) aren't
+    checked - metric definitions add those legitimately."""
+    if not sql:
+        return []
+    from agent.tools import metrics  # local import: metrics imports data_query, which this module mustn't cycle
+
+    dims = metrics.load()["dimensions"]
+    text = question.lower()
+    unasked = []
+    for column, value in _EQ_FILTER.findall(sql):
+        spec = dims.get(column.lower())
+        if not spec or not spec.get("values"):
+            continue
+        words = [value] + [syn for syn, target in spec.get("synonyms", {}).items() if target == value]
+        if not any(re.search(rf"\b{re.escape(w.lower())}\b", text) for w in words):
+            unasked.append(f"{column} = '{value}'")
+    return unasked
+
+
+def _reads_patient_data(sql: str | None) -> bool:
+    if not sql:
+        return True
+    refs = [ref.replace("`", "").lower().split(".")[-1] for ref in _TABLE_REF.findall(sql)]
+    return not refs or any(ref in _PATIENT_TABLES for ref in refs)
+
+
+def _count_columns(sql: str | None) -> set[str]:
+    return {alias.lower() for alias in _COUNT_ALIAS.findall(sql or "")}
+
+
+def _guard_rows(
+    rows: list[dict], suppress_small_counts: bool = True, count_columns: set[str] = frozenset()
+) -> tuple[list[dict], list[str], set[str], int]:
     """Returns (guarded_rows, masked_column_names, raw_phi_values, suppressed_cell_count)."""
     masked_columns, raw_values, suppressed, guarded = set(), set(), 0, []
     for row in rows[:MAX_TOOL_RESULT_ROWS]:
@@ -78,7 +136,8 @@ def _guard_rows(rows: list[dict]) -> tuple[list[dict], list[str], set[str], int]
                     raw_values.add(str(value))
                 out[column] = REDACTED
             elif (
-                _COUNT_LIKE.search(name)
+                suppress_small_counts
+                and (name in count_columns or _COUNT_LIKE.search(name))
                 and isinstance(value, int)
                 and not isinstance(value, bool)
                 and 0 < value < MIN_CELL_SIZE
@@ -136,8 +195,32 @@ def ask_genie(question: str, *, client: DatabricksClient | None = None) -> ToolR
             }
         )
 
-    rows, masked_columns, raw_values, suppressed = _guard_rows(answer.get("rows") or [])
+    unasked = _filters_not_in_question(question, answer.get("sql"))
+    if unasked:
+        return _result(
+            {
+                "ok": False,
+                "source": "genie",
+                "withheld": True,
+                "reason": (
+                    f"Genie's SQL filters on {unasked}, which the question didn't ask for - it may have "
+                    "answered a different question. Result withheld."
+                ),
+                "sql": answer.get("sql"),
+            }
+        )
+
+    rows, masked_columns, raw_values, suppressed = _guard_rows(
+        answer.get("rows") or [],
+        suppress_small_counts=_reads_patient_data(answer.get("sql")),
+        count_columns=_count_columns(answer.get("sql")),
+    )
     text = answer.get("text") or ""
+    if suppressed:
+        text = (
+            f"Genie's text answer was withheld: the result includes a group of fewer than {MIN_CELL_SIZE} "
+            "patients, which is too small to report."
+        )
     leaked_into_text = 0
     for value in raw_values:
         if value and value in text:

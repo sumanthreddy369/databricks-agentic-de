@@ -55,7 +55,10 @@ def build() -> dict:
     layer = load()
     dims, metrics = layer["dimensions"], layer["metrics"]
 
-    instructions = ["Metric definitions - use exactly these; they are shared with the project's fallback agent:\n"]
+    instructions = [
+        "Metric definitions - when a question matches one, use exactly this definition; they are shared with "
+        "the project's fallback agent:\n"
+    ]
     for m in metrics.values():
         filters = ", ".join(f"{k} = '{v}'" for k, v in m.get("filters", {}).items())
         line = f"* {m['name']} ({m['id']}): {m['description'].strip()} Table {GOLD_SCHEMA}.{m['table']}"
@@ -76,6 +79,10 @@ def build() -> dict:
             line += " (synonyms: " + ", ".join(f"'{k}' means {v}" for k, v in spec["synonyms"].items()) + ")"
         instructions.append(line + "\n")
     instructions += [
+        "Questions no metric covers are fine: write SQL against the listed tables. fct_vitals holds every "
+        "vital-sign reading (itemid values above), not just heart rate.\n",
+        "If a question names a value that isn't in these lists (for example a unit that doesn't exist), say "
+        "so and don't substitute a different value.\n",
         "Governance:\n",
         "* full_name and mrn are masked by policy and show ***REDACTED***. Never try to reveal, infer or "
         "reconstruct them.\n",

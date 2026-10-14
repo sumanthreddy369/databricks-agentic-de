@@ -7,6 +7,14 @@ request waits in the state file until a person decides here:
     uv run python -m agent.approvals list
     uv run python -m agent.approvals approve apr_1a2b3c4d5e --by "Jane Doe"
     uv run python -m agent.approvals reject  apr_1a2b3c4d5e --by "Jane Doe" --reason "known upstream issue"
+    uv run python -m agent.approvals classes
+    uv run python -m agent.approvals promote \
+        quarantine_bad_records:silver_vitals:plausible_vital_value --by "Jane Doe"
+
+`classes` and `promote` are earned autonomy (agent/autonomy.py): a class with
+a long enough run of approved, successful executions can be promoted, by a
+named person, to run without approval; it's demoted automatically on its
+first failure.
 
 Approving runs the action through the orchestrator's normal dispatch path, so
 the kill switch, escalation ceiling, guardrails, and audit log all apply at
@@ -26,6 +34,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from agent import autonomy
 from agent.healthcheck import DEFAULT_STATE_PATH
 from agent.orchestrator import DEFAULT_AUDIT_LOG_PATH, OrchestratorAgent
 from agent.tools import pipeline_health
@@ -61,11 +70,28 @@ def run(argv: list[str] | None = None, *, mcp_bridge=None) -> int:
     reject.add_argument("approval_id")
     reject.add_argument("--by", required=True, help="name of the person rejecting")
     reject.add_argument("--reason", default="")
+    sub.add_parser("classes", help="show each action class: policy, approval streak, eligibility")
+    promote = sub.add_parser("promote", help="let an eligible action class run without approval")
+    promote.add_argument("action_class")
+    promote.add_argument("--by", required=True, help="name of the person promoting it")
     args = parser.parse_args(argv)
 
     state_path = Path(args.state_path)
     if args.command == "list":
         print(json.dumps(pending(state_path), indent=2))
+        return 0
+    if args.command == "classes":
+        print(json.dumps(autonomy.summary(pipeline_health.load_state(state_path)), indent=2))
+        return 0
+    if args.command == "promote":
+        state = pipeline_health.load_state(state_path)
+        try:
+            record = autonomy.promote(state, args.action_class, args.by)
+        except ValueError as exc:
+            print(json.dumps({"error": str(exc)}))
+            return 1
+        pipeline_health.save_state(state_path, state)
+        print(json.dumps({"promoted": args.action_class, **record}))
         return 0
 
     agent = OrchestratorAgent(

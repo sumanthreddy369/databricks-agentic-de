@@ -50,6 +50,18 @@ dimensions:
   window_start:
     description: Start of a 15-minute event-time window (live vitals).
     type: timestamp
+  itemid:
+    description: Vital sign type in fct_vitals.
+    values: [dbp, heart_rate, resp_rate, sbp, spo2, temp_c]
+    synonyms:
+      oxygen saturation: spo2
+      o2 sat: spo2
+      pulse: heart_rate
+      heart rate: heart_rate
+      respiratory rate: resp_rate
+      temperature: temp_c
+      systolic: sbp
+      diastolic: dbp
 
 metrics:
   - id: current_census
@@ -119,6 +131,18 @@ metrics:
     dimensions: [unit, window_start]
     example_question: How many heart-rate readings did each unit record?
     example_group_by: [unit]
+
+  - id: avg_vital_value
+    name: Average vital-sign value
+    description: >-
+      Average reading of a vital sign (spo2, temp_c, sbp, dbp, resp_rate,
+      heart_rate) over all readings in fct_vitals, after Silver dropped
+      physically impossible values.
+    table: fct_vitals
+    measure: {type: avg, column: value}
+    dimensions: [itemid]
+    example_question: What is the average SpO2 reading?
+    example_filters: {itemid: spo2}
 
   - id: provider_count
     name: Providers
