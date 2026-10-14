@@ -209,7 +209,7 @@ def query_gold_table(
 # gold_live_vitals_by_unit. dim_providers describes staff, not patients, and
 # isn't suppressed.
 
-_METRICS = {"count", "count_distinct", "avg", "min", "max", "sum"}
+_METRICS = {"count", "count_distinct", "avg", "min", "max", "sum", "weighted_avg"}
 _COMPARISON_OPS = {"=", "!=", "<", "<=", ">", ">="}
 _MAX_GROUP_BY = 3
 _CELL_SIZE_SQL = {
@@ -223,7 +223,7 @@ _CELL_SIZE_SQL = {
 _HISTORY_TABLES = {"fct_encounter_history"}
 
 
-def _metric_sql(table: str, metric: str, column: str | None) -> str:
+def _metric_sql(table: str, metric: str, column: str | None, weight: str | None = None) -> str:
     if metric not in _METRICS:
         raise ValueError(f"metric must be one of {sorted(_METRICS)}")
     if metric == "count":
@@ -231,6 +231,13 @@ def _metric_sql(table: str, metric: str, column: str | None) -> str:
     if not column:
         raise ValueError(f"metric {metric} needs a column")
     col = _check_column(table, column, "aggregate")
+    if metric == "weighted_avg":
+        # e.g. average heart rate across 15-minute windows: weight each
+        # window's average by its reading count, never avg(avg).
+        if not weight:
+            raise ValueError("metric weighted_avg needs a weight column")
+        w = _check_column(table, weight, "weight")
+        return f"SUM({col} * {w}) / NULLIF(SUM({w}), 0)"
     return f"COUNT(DISTINCT {col})" if metric == "count_distinct" else f"{metric.upper()}({col})"
 
 
@@ -243,8 +250,9 @@ def _build_aggregate(
     group_by: list | None,
     as_of: str | None,
     qualified_table: str,
+    weight: str | None = None,
 ) -> tuple[str, list[tuple[str, object]]]:
-    metric_sql = _metric_sql(table, metric, column)
+    metric_sql = _metric_sql(table, metric, column, weight)
     group_cols = [_check_column(table, g, "group by") for g in (group_by or [])]
     if len(group_cols) > _MAX_GROUP_BY:
         raise ValueError(f"group_by takes at most {_MAX_GROUP_BY} columns")
@@ -285,6 +293,7 @@ def aggregate_gold_table(
     where: list | None = None,
     group_by: list | None = None,
     as_of: str | None = None,
+    weight: str | None = None,
     *,
     db_path: Path | None = None,
     seed_sql_path: Path | None = None,
@@ -298,7 +307,7 @@ def aggregate_gold_table(
         return _error(f"unknown table: {table}")
     rows = _run(
         table,
-        lambda qt: _build_aggregate(table, metric, column, filters, where, group_by, as_of, qt),
+        lambda qt: _build_aggregate(table, metric, column, filters, where, group_by, as_of, qt, weight),
         db_path=db_path,
         seed_sql_path=seed_sql_path,
     )

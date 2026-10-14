@@ -62,7 +62,7 @@ from agent.llm import Claude, ToolResult
 from agent.mcp_bridge import MCPToolBridge, get_default_bridge
 from agent.prompts import MODE_ROUTER_PROMPT, SYSTEM_PROMPT_DA, SYSTEM_PROMPT_DE
 from agent.state import OrchestratorResult
-from agent.tools import data_query, genie, governance_guard, pipeline_health
+from agent.tools import data_query, genie, governance_guard, metrics, pipeline_health
 from common.contracts import MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_ROWS
 
 logger = structlog.get_logger(__name__)
@@ -182,7 +182,11 @@ DA_TOOLS = [
             "type": "object",
             "properties": {
                 "table": {"type": "string"},
-                "metric": {"type": "string", "enum": ["count", "count_distinct", "avg", "min", "max", "sum"]},
+                "metric": {
+                    "type": "string",
+                    "enum": ["count", "count_distinct", "avg", "min", "max", "sum", "weighted_avg"],
+                },
+                "weight": {"type": "string"},
                 "column": {"type": "string"},
                 "filters": {"type": "object"},
                 "where": {
@@ -201,6 +205,28 @@ DA_TOOLS = [
                 "as_of": {"type": "string"},
             },
             "required": ["table", "metric"],
+        },
+    },
+    {
+        "name": "compute_metric",
+        "description": (
+            "Compute a governed business metric by name, using the shared definitions in the metrics layer "
+            "(the same definitions Genie is given). Prefer this over aggregate_gold_table whenever the question "
+            "matches a metric. Dimension values are exact (e.g. unit 'ICU' never matches 'PICU'); an unknown "
+            "value is refused with the allowed list. Metrics: "
+            + "; ".join(f"{m['id']} = {m['name']}" for m in metrics.load()["metrics"].values())
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "metric": {"type": "string", "enum": list(metrics.load()["metrics"])},
+                "group_by": {"type": "array", "items": {"type": "string"}},
+                "filters": {"type": "object"},
+                "since": {"type": "string"},
+                "until": {"type": "string"},
+                "as_of": {"type": "string"},
+            },
+            "required": ["metric"],
         },
     },
     LOOKUP_PROBLEM_TOOL,
@@ -393,6 +419,8 @@ class OrchestratorAgent:
             result = self._dispatch_query_gold_table(tool_input)
         elif tool_name == "aggregate_gold_table":
             result = self._dispatch_aggregate_gold_table(tool_input)
+        elif tool_name == "compute_metric":
+            result = self._dispatch_compute_metric(tool_input)
         elif tool_name == "ask_genie":
             # In-process, like the other DA tools: Genie's raw rows go straight
             # into ask_genie's own masking backstop before a ToolResult exists.
@@ -482,7 +510,7 @@ class OrchestratorAgent:
             kwargs["db_path"] = self.duckdb_path
         if self.seed_sql_path is not None:
             kwargs["seed_sql_path"] = self.seed_sql_path
-        optional = ("column", "filters", "where", "group_by", "as_of")
+        optional = ("column", "filters", "where", "group_by", "as_of", "weight")
         args = {key: tool_input[key] for key in optional if key in tool_input}
         table = tool_input.get("table", "")
         result = data_query.aggregate_gold_table(table, tool_input.get("metric", ""), **args, **kwargs)
@@ -490,6 +518,25 @@ class OrchestratorAgent:
             return result
         payload = json.loads(result.content)
         payload["rows"] = governance_guard.enforce_masking(table, payload["rows"], role=ORCHESTRATOR_ROLE)
+        return ToolResult(tool_use_id="", content=json.dumps(payload, default=str))
+
+    def _dispatch_compute_metric(self, tool_input: dict) -> ToolResult:
+        """Metrics-layer path: same in-process route and masking backstop as
+        aggregate_gold_table, which compute_metric runs through."""
+        kwargs = {}
+        if self.duckdb_path is not None:
+            kwargs["db_path"] = self.duckdb_path
+        if self.seed_sql_path is not None:
+            kwargs["seed_sql_path"] = self.seed_sql_path
+        optional = ("group_by", "filters", "since", "until", "as_of")
+        args = {key: tool_input[key] for key in optional if key in tool_input}
+        result = metrics.compute_metric(tool_input.get("metric", ""), **args, **kwargs)
+        if result.is_error:
+            return result
+        payload = json.loads(result.content)
+        payload["rows"] = governance_guard.enforce_masking(
+            payload["table"], payload["rows"], role=ORCHESTRATOR_ROLE
+        )
         return ToolResult(tool_use_id="", content=json.dumps(payload, default=str))
 
     def _dispatch_pipeline_health(self, tool_name: str, tool_input: dict) -> ToolResult:

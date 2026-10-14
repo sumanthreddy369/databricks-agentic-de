@@ -67,3 +67,18 @@ on Genie.
 Three hand-picked questions can't support any conclusion about accuracy,
 cost, or governance. Those need the golden question set and the measurement
 method above.
+
+### After the metrics layer (same day)
+
+The space's instructions and example SQL are now generated from
+`agent/knowledge/metrics.yaml`, the definitions `compute_metric` also uses.
+
+| Question | Genie SQL filter | Genie answer | compute_metric (live) |
+|---|---|---|---|
+| How many patients are currently in the ICU? | `unit = 'ICU'` (was `ILIKE '%ICU%'`) | 34 | 34 |
+| How many patients are in intensive care right now? | `unit = 'ICU'` | 34 | 34 (normalized "intensive care" -> ICU) |
+| How many patients are currently in the PICU? | no query; listed the allowed units | - | refused with the allowed units |
+
+Latency on these: Genie 7-24 s, compute_metric about 2 s against the same
+warehouse. Still three questions, not the comparison.
+

@@ -1,0 +1,139 @@
+# Metrics layer: the ONE place business metrics are defined.
+#
+# Read by:
+#   - agent/tools/metrics.py      (compute_metric - the fallback agent answers by metric name)
+#   - scripts/build_genie_space.py (generates governance/genie/space.json: Genie's
+#                                   instructions, example SQL and sample questions)
+# tests/test_metrics_layer.py fails if space.json is stale, and runs every
+# metric's generated Genie SQL against the same data as compute_metric to
+# prove both sides return the same number.
+#
+# Why: on the first real Genie run, "patients in the ICU" became
+# `unit ILIKE '%ICU%'` - same answer on our data, but a real hospital's PICU
+# and NICU would be counted too. Dimensions here have closed value lists and
+# exact matching, and every metric has exactly one definition.
+
+dimensions:
+  unit:
+    description: Hospital care unit.
+    values: [Cardiology, ED, ICU, MedSurg, Oncology]
+    # Rows in gold_live_vitals_by_unit whose reading had no encounter in effect.
+    extra_values: {gold_live_vitals_by_unit: [UNASSIGNED]}
+    synonyms:
+      intensive care: ICU
+      intensive care unit: ICU
+      emergency: ED
+      emergency department: ED
+      emergency room: ED
+      er: ED
+      med surg: MedSurg
+      med-surg: MedSurg
+      medical surgical: MedSurg
+      medical-surgical: MedSurg
+      cardiac: Cardiology
+      cancer: Oncology
+  encounter_type:
+    description: Type of encounter.
+    values: [emergency, inpatient, outpatient]
+  specialty:
+    description: Provider specialty.
+    values: [Cardiology, Critical Care, Emergency Medicine, Internal Medicine, Oncology]
+  home_unit:
+    description: Unit a provider is based in.
+    values: [Cardiology, ED, ICU, MedSurg, Oncology]
+  region:
+    description: Patient home region.
+    values: [midwest, northeast, south, west]
+  gender:
+    description: Patient gender as recorded.
+    values: [female, male, nonbinary]
+  window_start:
+    description: Start of a 15-minute event-time window (live vitals).
+    type: timestamp
+
+metrics:
+  - id: current_census
+    name: Current census
+    description: Patients currently admitted - encounters whose status is in-progress.
+    table: fct_encounters
+    measure: {type: count}
+    filters: {status: in-progress}
+    dimensions: [unit, encounter_type]
+    example_question: How many patients are currently in the ICU?
+    example_filters: {unit: ICU}
+
+  - id: census_at_time
+    name: Census at a point in time
+    description: >-
+      Distinct patients admitted (in-progress) at a past moment, from encounter
+      history. fct_encounters only holds current state, so past-time questions
+      must use this.
+    table: fct_encounter_history
+    measure: {type: count_distinct, column: patient_id}
+    filters: {status: in-progress}
+    requires_as_of: true
+    dimensions: [unit, encounter_type]
+    example_question: How many patients were in the ED at 2026-10-07 02:25 UTC?
+    example_filters: {unit: ED}
+    example_as_of: "2026-10-07 02:25:00"
+
+  - id: discharged_encounters
+    name: Discharged encounters
+    description: Encounters that have ended in discharge (all discharges in the data).
+    table: fct_encounters
+    measure: {type: count}
+    filters: {status: discharged}
+    dimensions: [unit, encounter_type]
+    example_question: How many encounters have been discharged by unit?
+    example_group_by: [unit]
+
+  - id: avg_heart_rate
+    name: Average heart rate
+    description: >-
+      Average heart rate from the live 15-minute windows, weighted by the
+      number of readings in each window (never the plain average of window
+      averages). The newest window may still be filling.
+    table: gold_live_vitals_by_unit
+    measure: {type: weighted_avg, column: avg_heart_rate, weight: reading_count}
+    time_column: window_start
+    dimensions: [unit, window_start]
+    example_question: What is the average heart rate by unit?
+    example_group_by: [unit]
+
+  - id: out_of_range_heart_rate_readings
+    name: Out-of-range heart-rate readings
+    description: Heart-rate readings outside the 55-140 bpm clinical alert band.
+    table: gold_live_vitals_by_unit
+    measure: {type: sum, column: out_of_range_count}
+    time_column: window_start
+    dimensions: [unit, window_start]
+    example_question: How many out-of-range heart-rate readings were there in the ICU?
+    example_filters: {unit: ICU}
+
+  - id: heart_rate_readings
+    name: Heart-rate readings
+    description: Number of heart-rate readings received.
+    table: gold_live_vitals_by_unit
+    measure: {type: sum, column: reading_count}
+    time_column: window_start
+    dimensions: [unit, window_start]
+    example_question: How many heart-rate readings did each unit record?
+    example_group_by: [unit]
+
+  - id: provider_count
+    name: Providers
+    description: Providers on the roster.
+    table: dim_providers
+    measure: {type: count}
+    dimensions: [specialty, home_unit]
+    example_question: How many providers do we have per specialty?
+    example_group_by: [specialty]
+
+  - id: patient_count
+    name: Patients
+    description: Distinct patients ever admitted.
+    table: dim_patients
+    measure: {type: count_distinct, column: patient_id}
+    dimensions: [region, gender]
+    example_question: How many patients do we have by region?
+    example_group_by: [region]

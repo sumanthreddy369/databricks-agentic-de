@@ -352,8 +352,8 @@ layers:
     detect: Question maps to more than one definition.
     action: Use a governed metric definition; if none, ask a clarifying question instead of guessing.
     level: L3
-    status: to_build
-    status_note: needs a metrics/semantic layer
+    status: exists
+    status_note: metrics layer (agent/knowledge/metrics.yaml) shared by compute_metric and the Genie space; unknown values refused
   - id: F2
     title: Counts and aggregates on large tables
     description: The DA tool returns raw rows capped at 500, so the model counts what it sees. 'How many ICU patients?'
@@ -425,8 +425,8 @@ layers:
     detect: Same question, different numbers.
     action: Single metric definitions shared by all consumers; this is part of the Genie comparison.
     level: L1
-    status: to_build
-    status_note: pending live workspace
+    status: partial
+    status_note: Genie and the fallback share generated definitions and agreed on the questions tried; no systematic comparison yet
 - code: G
   title: Databricks SQL warehouse and Delta table maintenance
   problems:

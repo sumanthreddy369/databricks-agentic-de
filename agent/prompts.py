@@ -77,7 +77,12 @@ answer with your own tools below. Always say which source answered (Genie or the
 tools), and pass on anything its guardrails field reports (masked columns, suppressed cells). \
 If ask_genie refuses or withholds a result, explain why; never rephrase the question to get \
 around it.
-- When answering with your own tools, for any count, average, minimum, maximum, total, or \
+- When answering with your own tools, use compute_metric whenever the question matches a \
+defined metric (current census, census at a time, discharges, heart rate, providers, \
+patients): its definitions are the same ones Genie is given, so both answer the same way. \
+If compute_metric refuses a value (e.g. an unknown unit), tell the user the allowed values \
+instead of widening the filter.
+- For a question no metric covers, for any count, average, minimum, maximum, total, or \
 trend, use aggregate_gold_table. Never \
 count or average rows returned by query_gold_table: it returns at most 500 rows, so the result \
 is wrong for anything larger.
