@@ -20,7 +20,7 @@ from reportlab.lib import colors
 REPO = Path(__file__).resolve().parent.parent
 PDF_OUT = REPO / "docs" / "workflow_and_tech_stack.pdf"
 DOCX_OUT = REPO / "docs" / "workflow_and_tech_stack.docx"
-SNAPSHOT = "Status as of 14 Oct 2026"
+SNAPSHOT = "Status as of 15 Oct 2026"
 
 INK = colors.HexColor("#1f2933")
 MUTED = colors.HexColor("#52606d")
@@ -216,9 +216,9 @@ REPO_MAP = [
 
 NEXT = [
     ["#", "Step", "Needs", "Outcome"],
-    ["1", "Regenerate the dataset with the physiology simulator and re-run the pipeline and golden set", "Databricks login", "Databricks data matches the simulator"],
+    ["1", "Pipeline health from the Lakeflow event log into the Grafana dashboard", "-", "Live pipeline panels next to the agent metrics"],
     ["2", "Detect patient identity drift in Silver (same patient_id, new name or birth date)", "A pipeline run", "The EDA defect caught by the pipeline"],
-    ["3", "Pipeline health from the Lakeflow event log into the dashboard", "Databricks login", "Live pipeline panels next to the agent metrics"],
+    ["3", "Catalog M2, the other half: the same person under two patient_ids (candidate matching on masked attributes)", "-", "Duplicate patients reported to a steward"],
     ["4", "Healthcheck job on serverless; live pipeline tools run against the workspace", "Databricks login", "The incident workflow running for real"],
     ["5", "Claude as the router, or a Databricks-hosted model on trial credits", "A paid key, or a check of hosted models", "Free-form requests handled end to end"],
     ["6", "Agent Bricks runbook agent over the problem catalog", "Workspace", "How-to questions answered from the catalog"],
@@ -253,9 +253,9 @@ def story(fx):
         grid(
             [
                 ["Area", "State"],
-                ["Pipelines on Databricks (GCP trial, serverless)", "Runs - 103,301 events end to end; layer counts reconcile"],
+                ["Pipelines on Databricks (Free Edition; earlier GCP trial)", "Runs - regenerated data, every count matches the local prediction; event log records 241 drops, 23 identity flags"],
                 ["Unity Catalog masks", "Runs - 1,388 of 1,388 names and MRNs masked in Gold; row filter and grants not tested"],
-                ["Genie behind the guardrails", "Measured - 27-question golden set, 2 live runs; current guard: 21/21 answers, 6/6 safety probes"],
+                ["Genie behind the guardrails", "Measured - 27-question golden set, 3 live runs; run 3 (Free Edition): 21/21 answers, 6/6 safety probes"],
                 ["Metrics layer", "Runs - one definition per metric for Genie and compute_metric"],
                 ["Human approval, earned autonomy, human-work report", "Tested locally - no real week of operation yet"],
                 ["Observability (OTel, Prometheus, Jaeger, Grafana)", "Runs locally on demo traffic through the real orchestrator"],
@@ -389,28 +389,30 @@ def story(fx):
         ],
     )
     s += workflow(
-        "W5. Deploy and run on the free trial",
-        "From laptop to a running pipeline on the GCP trial workspace, serverless only, and back to nothing running.",
+        "W5. Deploy and run on Databricks Free Edition",
+        "From laptop to a running pipeline on Databricks Free Edition (serverless, no cost, doesn't expire), and back "
+        "to nothing running. The GCP trial workspace was used first; it locked sign-in when the trial ended.",
         "w5",
         [
-            ["Login", "databricks auth login"],
+            ["Login", "auth login --profile free"],
             ["Catalog + schemas", "SQL on the warehouse"],
             ["Upload dataset", "to a UC volume"],
-            ["bundle deploy -t dev", "pipelines + jobs"],
+            ["bundle deploy -t free", "pipelines + jobs"],
             ["Run pipeline", "triggered, serverless"],
-            ["Genie space", "build + sync from", "the metrics layer"],
+            ["Genie space", "create from the", "generated space.json"],
             ["Stop everything", "scripts/stop_everything.py"],
         ],
         [OURS, PLAT, PLAT, PLAT, PLAT, PLAT, OURS],
         [
             ["Step", "Command", "Cost", "Notes", "Status"],
-            ["Login", "databricks auth login --profile DEFAULT", "Free", "Token expires; log in again before live work", "Runs"],
-            ["Deploy", "databricks bundle deploy -t dev", "Free until something runs", "Dev mode pauses schedules", "Runs"],
-            ["Run", "databricks bundle run streaming_patient_pipeline", "Serverless DBUs from trial credits", "Triggered, not continuous", "Runs"],
-            ["Genie space", "build_genie_space.py, then sync_genie_space.py", "Trial credits per question", "Instructions generated from metrics.yaml", "Runs"],
-            ["Stop", "uv run python scripts/stop_everything.py", "-", "Pre-approved after every session", "Validated - dry run on the workspace"],
+            ["Login", "databricks auth login --profile free", "Free", "OAuth in the browser; the account owner approves", "Runs"],
+            ["Catalog, data", "CREATE CATALOG / SCHEMA / VOLUME; databricks fs cp", "Free", "Same catalog name as before, so no code changes", "Runs"],
+            ["Deploy + run", "databricks bundle deploy -t free; bundle run streaming_patient_pipeline", "Free (quota)", "Dev mode pauses schedules; triggered", "Runs - counts match the local prediction"],
+            ["Evidence", "scripts/workspace_snapshot.py <pipeline_id>", "Free", "Row counts + event-log expectations into docs/", "Runs"],
+            ["Genie + golden set", "databricks genie create-space; python -m evals.golden.run", "Free (quota)", "Run 3: guarded 27/27", "Runs"],
+            ["Stop", "uv run python scripts/stop_everything.py --profile free", "-", "Pre-approved after every session", "Runs"],
         ],
-        notes=["Only the account owner can guarantee $0 after the trial: set a GCP budget alert and cancel the Databricks subscription in GCP Marketplace before the trial ends."],
+        notes=["The old GCP trial: only the account owner can cancel its Databricks subscription in GCP Marketplace, which guarantees it never bills."],
     )
     s += workflow(
         "W6. Measure: answers, safety, data, work",

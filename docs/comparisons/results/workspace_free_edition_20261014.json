@@ -1,0 +1,173 @@
+{
+  "measured_at": "2026-10-14T22:15:27Z",
+  "workspace": "free_edition",
+  "note": "Regenerated physiology dataset (103,407 events, 23 injected identity collisions), first run on Databricks Free Edition",
+  "tables": [
+    {
+      "table": "gold.dim_patients",
+      "type": "MATERIALIZED_VIEW",
+      "rows": 1359
+    },
+    {
+      "table": "gold.dim_providers",
+      "type": "MATERIALIZED_VIEW",
+      "rows": 30
+    },
+    {
+      "table": "gold.fct_encounter_history",
+      "type": "MATERIALIZED_VIEW",
+      "rows": 3814
+    },
+    {
+      "table": "gold.fct_encounters",
+      "type": "MATERIALIZED_VIEW",
+      "rows": 1382
+    },
+    {
+      "table": "gold.fct_vitals",
+      "type": "STREAMING_TABLE",
+      "rows": 99352
+    },
+    {
+      "table": "gold.gold_live_vitals_by_unit",
+      "type": "MATERIALIZED_VIEW",
+      "rows": 5
+    },
+    {
+      "table": "silver.bronze_patient_events",
+      "type": "STREAMING_TABLE",
+      "rows": 103407
+    },
+    {
+      "table": "silver.bronze_provider_roster",
+      "type": "STREAMING_TABLE",
+      "rows": 30
+    },
+    {
+      "table": "silver.event_log_ba5f03c4_c4b8_4f7a_8857_6891b24068a2",
+      "type": "MANAGED",
+      "rows": 56
+    },
+    {
+      "table": "silver.event_log_cb164940_713d_4dc2_a929_98b8200fb0e5",
+      "type": "MANAGED",
+      "rows": 162
+    },
+    {
+      "table": "silver.raw_patient_events",
+      "type": "STREAMING_TABLE",
+      "rows": 103407
+    },
+    {
+      "table": "silver.raw_provider_roster",
+      "type": "STREAMING_TABLE",
+      "rows": 30
+    },
+    {
+      "table": "silver.silver_dim_patients",
+      "type": "STREAMING_TABLE",
+      "rows": 1359
+    },
+    {
+      "table": "silver.silver_fct_encounter_history",
+      "type": "STREAMING_TABLE",
+      "rows": 3814
+    },
+    {
+      "table": "silver.silver_fct_encounters",
+      "type": "STREAMING_TABLE",
+      "rows": 1382
+    },
+    {
+      "table": "silver.silver_fct_vitals",
+      "type": "STREAMING_TABLE",
+      "rows": 99352
+    },
+    {
+      "table": "silver.silver_patient_admissions",
+      "type": "STREAMING_TABLE",
+      "rows": 1382
+    },
+    {
+      "table": "silver.silver_patient_identity_conflicts",
+      "type": "MATERIALIZED_VIEW",
+      "rows": 23
+    },
+    {
+      "table": "silver.silver_provider_roster",
+      "type": "STREAMING_TABLE",
+      "rows": 30
+    }
+  ],
+  "expectations": [
+    {
+      "dataset": "encounters_cdc_view",
+      "expectation": "valid_encounter_id",
+      "passed": 7628,
+      "failed": 0
+    },
+    {
+      "dataset": "encounters_cdc_view",
+      "expectation": "valid_patient_id",
+      "passed": 7628,
+      "failed": 0
+    },
+    {
+      "dataset": "bronze_patient_events",
+      "expectation": "has_event_id",
+      "passed": 103407,
+      "failed": 0
+    },
+    {
+      "dataset": "bronze_patient_events",
+      "expectation": "has_event_type",
+      "passed": 103407,
+      "failed": 0
+    },
+    {
+      "dataset": "silver_fct_vitals",
+      "expectation": "known_vital_item",
+      "passed": 99593,
+      "failed": 0
+    },
+    {
+      "dataset": "silver_fct_vitals",
+      "expectation": "plausible_vital_value",
+      "passed": 99352,
+      "failed": 241
+    },
+    {
+      "dataset": "silver_patient_identity_conflicts",
+      "expectation": "one_identity_per_patient_id",
+      "passed": 0,
+      "failed": 23
+    },
+    {
+      "dataset": "patients_cdc_view",
+      "expectation": "valid_patient_id",
+      "passed": 1382,
+      "failed": 0
+    },
+    {
+      "dataset": "silver_contract_checked_events",
+      "expectation": "has_event_type",
+      "passed": 517035,
+      "failed": 0
+    },
+    {
+      "dataset": "silver_contract_checked_events",
+      "expectation": "known_event_type",
+      "passed": 517035,
+      "failed": 0
+    }
+  ],
+  "masks": {
+    "patients": 1359,
+    "names_masked": 1359,
+    "mrns_masked": 1359
+  },
+  "identity_check": {
+    "patient_ids_admitted_more_than_once": 23,
+    "flagged_two_people_one_id": 23
+  }
+}

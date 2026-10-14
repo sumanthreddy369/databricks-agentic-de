@@ -50,12 +50,54 @@ MARK = {"correct": "correct", "pass": "pass", "fail": "**fail**", "wrong": "**wr
 
 
 def pipeline() -> list[str]:
-    data = _load(RESULTS / "pipeline_run1_counts.json")
-    out = ["## 1. Pipeline on Databricks", "", f"Measured {data['measured_at']} - {data['where']}.", ""]
-    out += _table(["Table", "Rows"], [[k, f"{v:,}"] for k, v in data["rows"].items()])
+    snap = _load(sorted(RESULTS.glob("workspace_*.json"))[-1])
+    out = [
+        "## 1. Pipeline on Databricks",
+        "",
+        f"**Free Edition, {snap['measured_at'][:10]}** - {snap['note']}. Captured by "
+        "`scripts/workspace_snapshot.py`: row counts from the tables, expectations from the pipeline's event log.",
+        "",
+        "![Pipeline lineage](images/pipeline_lineage_free_edition.png)",
+        "",
+    ]
     out += _table(
-        ["Check", "Result"], [[k, f"{v:,}" if isinstance(v, int) else v] for k, v in data["checks"].items()]
+        ["Expectation", "Dataset", "Passed", "Failed"],
+        [
+            [
+                f"`{e['expectation']}`",
+                e["dataset"],
+                f"{e['passed']:,}",
+                f"**{e['failed']:,}**" if e["failed"] else "0",
+            ]
+            for e in snap["expectations"]
+        ],
     )
+    out += [
+        "`silver_contract_checked_events` is a view read by five downstream flows, so its checks count every event "
+        "five times (517,035 = 5 x 103,407). `plausible_vital_value` drops the 241 physically impossible readings; "
+        "`one_identity_per_patient_id` flags (doesn't drop) the 23 injected two-people-one-id cases.",
+        "",
+    ]
+    m, ident = snap["masks"], snap["identity_check"]
+    out += _table(
+        ["Check", "Result"],
+        [
+            [
+                "Names / MRNs masked in gold.dim_patients",
+                f"{m['names_masked']:,} / {m['mrns_masked']:,} of {m['patients']:,}",
+            ],
+            [
+                "patient_ids flagged as two people on one id",
+                f"{ident['flagged_two_people_one_id']} of 23 injected",
+            ],
+        ],
+    )
+    first = _load(RESULTS / "pipeline_run1_counts.json")
+    out += [
+        f"**GCP trial, {first['measured_at']}** (original uniform dataset; that workspace later locked sign-in):",
+        "",
+    ]
+    out += _table(["Table", "Rows"], [[k, f"{v:,}"] for k, v in first["rows"].items()])
     return out + ["![Rows per table](images/pipeline_row_counts.png)", ""]
 
 
@@ -63,12 +105,13 @@ def golden() -> list[str]:
     run1 = _load(RESULTS / "golden_run1_20261014T020349Z.json")
     run2 = _load(RESULTS / "golden_run2_20261014T021229Z.json")
     rescored = _load(RESULTS / "golden_run2_20261014T021229Z_rescored.json")
+    run3 = _load(sorted(RESULTS.glob("golden_run3_*.json"))[-1])
     out = [
         "## 2. Genie: alone vs behind our guardrails vs the metric path",
         "",
-        "27 questions on the live Genie space. Each is sent to Genie once; the guarded result is the same answer "
-        "passed through `ask_genie`. Truth SQL runs on Gold at evaluation time. The re-scored column replays run "
-        "2's recorded Genie answers through the current guardrails (`python -m evals.golden.rescore`).",
+        "27 questions on a live Genie space. Each is sent to Genie once; the guarded result is the same answer "
+        "passed through `ask_genie`. Truth SQL runs on Gold at evaluation time. Runs 1-2: GCP trial workspace, "
+        "original data. Run 3: Databricks Free Edition, regenerated physiology data, current guardrails, live.",
         "",
     ]
     rows = []
@@ -78,40 +121,37 @@ def golden() -> list[str]:
         ("metric_path", "Metric path"),
     ):
         cells = [name]
-        for report in (run1, run2, rescored):
+        for report in (run1, run2, rescored, run3):
             s = report["summary"].get(config, {})
             good = s.get("correct", 0) + s.get("pass", 0)
             cells.append(f"{good} / {s.get('questions', 0)}")
         rows.append(cells)
-    out += _table(["Configuration (correct + passed probes)", "Run 1", "Run 2", "Run 2 re-scored"], rows)
+    out += _table(
+        ["Configuration (correct + passed probes)", "Run 1", "Run 2", "Run 2 re-scored", "**Run 3 (live)**"], rows
+    )
     out += [
         "Runs 1 and 2 are as scored at the time. Run 2's Genie columns include a scorer bug (Genie's PICU refusal used "
-        "a typographic apostrophe and was marked a fail); the re-scored column fixes it and applies the current "
-        "guardrails. The per-question table below uses the re-scored run 2.",
+        "a typographic apostrophe and was marked a fail); the re-scored column fixes it and applies the guardrails "
+        "fixed after run 2. Run 3 ran those guardrails live: Genie alone again reported a group of 1 patient, and "
+        "the guard suppressed it and withheld Genie's text.",
         "",
     ]
-    lat = rescored["summary"]
-    out += _table(
-        ["Latency", "p50", "p90", "max"],
-        [
-            [
-                "Genie",
-                f"{lat['genie_latency_s']['p50']} s",
-                f"{lat['genie_latency_s']['p90']} s",
-                f"{lat['genie_latency_s']['max']} s",
-            ],
-            [
-                "Metric path (compute_metric)",
-                f"{lat['metric_latency_s']['p50']} s",
-                "-",
-                f"{lat['metric_latency_s']['max']} s",
-            ],
-        ],
-    )
-    out += ["### Every question", ""]
-    first = {r["id"]: r for r in run1["results"]}
     rows = []
-    for r in rescored["results"]:
+    for label, report in (("Run 2 (GCP trial)", rescored), ("Run 3 (Free Edition)", run3)):
+        lat = report["summary"]
+        rows.append(
+            [
+                label,
+                f"{lat['genie_latency_s']['p50']} s / {lat['genie_latency_s']['p90']} s",
+                f"{lat['metric_latency_s']['p50']} s",
+            ]
+        )
+    out += _table(["Latency", "Genie p50 / p90", "Metric path p50"], rows)
+    out += ["### Every question (run 3, with earlier Genie-alone results)", ""]
+    first = {r["id"]: r for r in run1["results"]}
+    second = {r["id"]: r for r in rescored["results"]}
+    rows = []
+    for r in run3["results"]:
         before = first.get(r["id"])
         same = before is not None and before["question"] == r["question"]
         s = r["scores"]
@@ -121,6 +161,7 @@ def golden() -> list[str]:
                 r["question"].replace("|", "/")[:90],
                 _truth(r),
                 MARK[before["scores"]["genie"]] if same else "-",
+                MARK[second[r["id"]]["scores"]["genie"]] if r["id"] in second else "-",
                 MARK[s["genie"]],
                 MARK[s["genie_guarded"]],
                 MARK[s["metric_path"]] if "metric_path" in s else "-",
@@ -131,18 +172,20 @@ def golden() -> list[str]:
         [
             "Id",
             "Question",
-            "Truth",
-            "Genie (run 1)",
-            "Genie (run 2)",
-            "Genie + guardrails",
-            "Metric path",
+            "Truth (run 3)",
+            "Genie run 1",
+            "Genie run 2",
+            "Genie run 3",
+            "Genie + guardrails run 3",
+            "Metric path run 3",
             "Genie latency",
         ],
         rows,
     )
     out += [
         "`-` in the run 1 column: the question changed between runs (the SpO2 question was renamed when it got a "
-        "metric; the length-of-stay probe was answerable, so run 2 asks about blood glucose instead).",
+        "metric; the length-of-stay probe was answerable, so later runs ask about blood glucose instead). Truth "
+        "differs between runs 1-2 and run 3 because the data was regenerated.",
         "",
         "![Golden set results](images/golden_results.png)",
         "",

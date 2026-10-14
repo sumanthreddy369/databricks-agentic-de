@@ -30,17 +30,22 @@ uncontrolled access to patient data.** Concretely:
 **Status: in development.** The glue-and-guardrail layer, simulator, MCP
 tool layer and ML lifecycle run and are tested locally.
 
-**Running on Databricks:** both pipelines are deployed to a GCP trial
-workspace (dev target, serverless, triggered) and have run end to end on
-103,301 synthetic events. The layers reconcile, and Unity Catalog masks
-`full_name` / `mrn` in Gold (1,388 of 1,388 rows redacted, even for the
-workspace owner).
+**Running on Databricks (Free Edition, $0):** the project first ran on
+a GCP trial workspace. When that trial locked sign-in, it moved to
+Databricks Free Edition (`free` target in `databricks.yml`). It runs on
+the regenerated physiology data (103,407 events):
 
-**Genie, measured:** a 27-question golden set ran against the live Genie
-space twice (2026-10-14). Genie answered every answerable question
-correctly in run 2. Behind this project's guardrails it also passed all six
-governance probes; on its own it failed one, by reporting a group of a
-single patient. See [Results so far](#results-so-far).
+- **Pipeline:** every layer's count matches the local prediction.
+- **Masks:** Unity Catalog masks 1,359 of 1,359 names and MRNs in Gold.
+- **Identity check:** flags all 23 injected two-people-one-id cases.
+- **Event log:** shows 241 impossible vitals dropped and 23 identities
+  flagged.
+
+**Genie, measured:** a 27-question golden set has run three times. In run
+3 (Free Edition, live), Genie behind this project's guardrails scored
+27/27. Genie alone scored 26/27: it again reported a group of one patient,
+and the guard suppressed it. See [Results so far](#results-so-far) and
+every question in [`docs/results.md`](docs/results.md).
 
 **Still mock-tested or not run:** the live pipeline-control tools
 (restart, expectation metrics) are tested only against mocks. The agent
@@ -63,15 +68,22 @@ Every table: [`docs/results.md`](docs/results.md). See
 
 ## Results so far
 
-All numbers below are from the GCP trial workspace and synthetic data.
+Numbers below are from the GCP trial workspace (runs 1-2, original data) and Databricks Free Edition
+(run 3, regenerated data); all synthetic.
 Charts are rebuilt by `scripts/build_readme_images.py`.
 
 ![Architecture](docs/images/architecture.png)
 
-**Pipeline, first full run.** 103,301 raw events landed in Bronze, and the
-Silver and Gold counts reconcile with it: 1,401 encounters (1,201
-discharged, 200 open), 1,388 patients with every name and MRN masked by
-Unity Catalog.
+**Pipeline on Databricks Free Edition** (regenerated physiology data):
+every table's rows, and every expectation from the pipeline's own event log
+(`scripts/workspace_snapshot.py`).
+
+![Pipeline lineage on Databricks Free Edition](docs/images/pipeline_lineage_free_edition.png)
+
+**First run, GCP trial (original data).** 103,301 raw events landed in
+Bronze, and the Silver and Gold counts reconcile with it: 1,401 encounters
+(1,201 discharged, 200 open), 1,388 patients with every name and MRN masked
+by Unity Catalog.
 
 ![Rows per table after the first pipeline run](docs/images/pipeline_row_counts.png)
 
@@ -86,13 +98,13 @@ Genie once; the guarded result is the same Genie answer passed through
 
 ![Golden question set results](docs/images/golden_results.png)
 
-| | Run 1 | Run 2 |
-|---|---|---|
-| Genie alone: answerable correct | 20 / 21 | 21 / 21 |
-| Genie alone: governance probes passed | 4 / 6 | 5 / 6 |
-| Genie + guardrails: answerable correct | 19 / 21 | 21 / 21 |
-| Genie + guardrails: governance probes passed | 4 / 6 | 6 / 6 (after the fix below) |
-| Metric path (`compute_metric`, no LLM; mapped questions only) | 19 / 19 answered, 1 / 1 probe | 20 / 20 answered, 1 / 1 probe |
+| | Run 1 | Run 2 | Run 3 (Free Edition, live) |
+|---|---|---|---|
+| Genie alone: answerable correct | 20 / 21 | 21 / 21 | 21 / 21 |
+| Genie alone: governance probes passed | 4 / 6 | 5 / 6 | 5 / 6 |
+| Genie + guardrails: answerable correct | 19 / 21 | 21 / 21 | 21 / 21 |
+| Genie + guardrails: governance probes passed | 4 / 6 | 6 / 6 (after the fix below) | **6 / 6** |
+| Metric path (`compute_metric`, no LLM; mapped questions only) | 19 / 19 answered, 1 / 1 probe | 20 / 20 answered, 1 / 1 probe | 20 / 20 answered, 1 / 1 probe |
 
 Run 1 is as recorded. One of its probes (average length of stay) turned
 out to be answerable from encounter history, so run 2 replaced it with
@@ -962,7 +974,7 @@ live infrastructure, or pure planning with no implementation at all
 | Scenario evals (`evals/`) | Partial - harness, graders, and 14 scenarios tested with a scripted model; **not yet run against the real model**, so no pass rate exists |
 | CI — lint + test (`.github/workflows/ci.yml`) | Complete |
 | CI — bundle validate (`.github/workflows/bundle-validate.yml`) | Complete (its skip path is what actually runs here; `databricks bundle validate` itself is untested) |
-| Lakeflow (DLT) medallion pipeline (`pipeline/`) | Runs - deployed to the GCP trial workspace (dev, serverless, triggered) and run end to end on synthetic data; layer counts reconcile. Dataset graph also checked statically by `tests/test_dlt_pipeline_graph.py`. Not yet run continuously or on a Kafka source |
+| Lakeflow (DLT) medallion pipeline (`pipeline/`) | Runs - on Databricks Free Edition (`free` target) with the regenerated data, counts matching the local prediction and the event log recording every expectation (`docs/results.md`); earlier on the GCP trial workspace (dev, serverless, triggered) and run end to end on synthetic data; layer counts reconcile. Dataset graph also checked statically by `tests/test_dlt_pipeline_graph.py`. Not yet run continuously or on a Kafka source |
 | Patient identity check (`silver_patient_identity_conflicts`, problem catalog M2) | Partial - flags patient_ids admitted more than once with a different name or birth date: two people on one id (warn-only; counts, never names; a steward decides). Graph-tested; its logic finds all 23 collisions injected into the regenerated data (13 accidental ones in the original). Not yet run on the workspace |
 | Unity Catalog masks + row filters (`governance/05_unity_catalog/`, declared in `pipeline/04_gold/`) | Partial - column masks verified on the workspace (all names/MRNs redacted in Gold); row filter attached but not tested with a restricted group; grants and account groups not applied (`CREATE GROUP` isn't how account groups are created) |
 | Databricks Asset Bundle (`databricks.yml`, `resources/*.yml`) | Runs - deployed to the dev target; the agent healthcheck job is prod-only until it's reworked for serverless (the trial workspace is serverless-only) |
@@ -970,7 +982,7 @@ live infrastructure, or pure planning with no implementation at all
 | Lakehouse Federation to BigQuery example | Stubbed — illustrative SQL, never run |
 | Terraform GCP infrastructure (`infra/terraform/`) | Stubbed — structurally correct, `terraform apply` never run |
 | Cloud Run simulator deployment (`infra/cloudrun/`) | Stubbed — never built or deployed |
-| Golden question set (`evals/golden/`: 27 questions, truth SQL, deterministic scoring, `run` and `rescore`) | Runs - two live runs against Genie, Genie + guardrails and the metric path; results in [Results so far](#results-so-far). Cost per query not measured yet |
+| Golden question set (`evals/golden/`: 27 questions, truth SQL, deterministic scoring, `run` and `rescore`) | Runs - three live runs against Genie, Genie + guardrails and the metric path (runs 1-2 GCP trial, run 3 Free Edition: guarded 27/27); every question in `docs/results.md`. Cost per query not measured yet |
 | Agent Bricks / Vertex AI comparisons (`docs/comparisons/`) | Target (not built yet) — criteria/methodology only, no results |
 
 ---

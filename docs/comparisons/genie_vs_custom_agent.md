@@ -80,6 +80,30 @@ Still open: cost per question (Genie's share of trial credits isn't broken
 out), and the Claude-orchestrated path (needs an Anthropic API key; see
 the README).
 
+### Run 3: Databricks Free Edition, live (2026-10-14)
+
+The GCP trial locked sign-in, so the project moved to Databricks Free
+Edition. The pipeline ran on the regenerated physiology data, and a new
+Genie space was created from the same generated `space.json`. Truth was
+recomputed on the new Gold tables.
+
+| | Correct (21) | Probes passed (6) |
+|---|---|---|
+| Genie alone | 21 | 5 |
+| Genie + guardrails | 21 | **6** |
+| Metric path | 20 / 20 | 1 / 1 |
+
+Latency: Genie p50 13.8 s, p90 15.9 s; metric path p50 1.6 s.
+
+The run-2 failure recurred and was caught live this time. Asked about
+nonbinary midwest ICU patients (true count: 1), Genie answered "1". The
+guard identified the `COUNT(...)` column, suppressed the cell and withheld
+Genie's text. It was the same behaviour on a different workspace, with
+different data and a different space - the case for a check that holds
+every time.
+
+Report: [`results/golden_run3_free_edition_20261014T222105Z.json`](results/golden_run3_free_edition_20261014T222105Z.json).
+
 ### Setup
 
 What exists (2026-10-14):

@@ -207,10 +207,145 @@ def golden_charts(report_path: Path):
     plt.close(fig)
 
 
+# Warning status, darkened from #fab219 so it reads as text on the light surface.
+WARN = "#9a6700"
+
+
+def pipeline_lineage(snapshot_path: Path):
+    """The pipeline as it ran, from a workspace snapshot (scripts/workspace_snapshot.py):
+    row counts per table and each expectation's outcome from the event log."""
+    snap = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    rows = {t["table"].split(".")[-1]: t["rows"] for t in snap["tables"]}
+    exp = {(e["dataset"], e["expectation"]): e for e in snap["expectations"]}
+
+    def check(dataset, name, kind):
+        e = exp.get((dataset, name))
+        if e is None:
+            return None
+        if e["failed"] == 0:
+            return (f"{name}: 0 failed", GOOD)
+        verb = {"drop": "dropped", "warn": "flagged", "fail": "failed"}[kind]
+        return (f"{name}: {e['failed']:,} {verb}", WARN if kind == "warn" else INK_2)
+
+    # (column, row, title, rows key or text, checks)
+    boxes = [
+        (0, 0, "raw_patient_events", rows.get("raw_patient_events"), []),
+        (
+            1,
+            0,
+            "bronze_patient_events",
+            rows.get("bronze_patient_events"),
+            [check("bronze_patient_events", "has_event_id", "warn")],
+        ),
+        (
+            2,
+            0,
+            "contract gate (view)",
+            "hard stop on unknown event types",
+            [check("silver_contract_checked_events", "known_event_type", "fail")],
+        ),
+        (
+            3,
+            -2,
+            "silver_fct_vitals",
+            rows.get("silver_fct_vitals"),
+            [check("silver_fct_vitals", "plausible_vital_value", "drop")],
+        ),
+        (3, -1, "silver_fct_encounters", rows.get("silver_fct_encounters"), []),
+        (3, 0, "silver_fct_encounter_history", rows.get("silver_fct_encounter_history"), []),
+        (3, 1, "silver_dim_patients", rows.get("silver_dim_patients"), []),
+        (3, 2, "silver_patient_admissions", rows.get("silver_patient_admissions"), []),
+        (
+            4,
+            -2,
+            "gold.fct_vitals",
+            rows.get("fct_vitals"),
+            [(f"-> gold_live_vitals_by_unit: {rows.get('gold_live_vitals_by_unit', 0)} windows", INK_2)],
+        ),
+        (4, -1, "gold.fct_encounters", rows.get("fct_encounters"), []),
+        (4, 0, "gold.fct_encounter_history", rows.get("fct_encounter_history"), []),
+        (
+            4,
+            1,
+            "gold.dim_patients",
+            rows.get("dim_patients"),
+            [(f"names / MRNs masked: {snap['masks']['names_masked']:,} / {snap['masks']['mrns_masked']:,}", GOOD)],
+        ),
+        (
+            4,
+            2,
+            "silver_patient_identity_conflicts",
+            rows.get("silver_patient_identity_conflicts"),
+            [check("silver_patient_identity_conflicts", "one_identity_per_patient_id", "warn")],
+        ),
+        (0, 3.4, "raw_provider_roster", rows.get("raw_provider_roster"), []),
+        (1, 3.4, "bronze_provider_roster", rows.get("bronze_provider_roster"), []),
+        (3, 3.4, "silver_provider_roster", rows.get("silver_provider_roster"), []),
+        (4, 3.4, "gold.dim_providers", rows.get("dim_providers"), []),
+    ]
+    edges = [((0, 0), (1, 0)), ((1, 0), (2, 0))]
+    edges += [((2, 0), (3, y)) for y in (-2, -1, 0, 1, 2)]
+    edges += [((3, y), (4, y)) for y in (-2, -1, 0, 1, 2)]
+    edges += [((0, 3.4), (1, 3.4)), ((1, 3.4), (3, 3.4)), ((3, 3.4), (4, 3.4))]
+
+    fig, ax = plt.subplots(figsize=(14, 7.2))
+    w, h, xgap = 2.25, 0.78, 2.75
+    pos = {}
+    for col, row, title, value, checks in boxes:
+        x, y = col * xgap, -row
+        pos[(col, row)] = (x, y)
+        ax.add_patch(
+            matplotlib.patches.FancyBboxPatch(
+                (x - w / 2, y - h / 2),
+                w,
+                h,
+                boxstyle="round,pad=0.02,rounding_size=0.08",
+                facecolor=SURFACE,
+                edgecolor=GRID,
+                linewidth=1.2,
+                zorder=2,
+            )
+        )
+        ax.text(x, y + 0.2, title, ha="center", va="center", fontsize=8.6, color=INK, fontweight="bold", zorder=3)
+        detail = f"{value:,} rows" if isinstance(value, int) else (value or "")
+        ax.text(x, y - 0.02, detail, ha="center", va="center", fontsize=8.4, color=INK_2, zorder=3)
+        for i, c in enumerate(c for c in checks if c):
+            ax.text(x, y - 0.24 - i * 0.17, c[0], ha="center", va="center", fontsize=7.6, color=c[1], zorder=3)
+    for a, b in edges:
+        (x1, y1), (x2, y2) = pos[a], pos[b]
+        ax.annotate(
+            "",
+            xy=(x2 - w / 2, y2),
+            xytext=(x1 + w / 2, y1),
+            arrowprops={"arrowstyle": "-|>", "color": SERIES_1, "lw": 1.1, "shrinkA": 2, "shrinkB": 2},
+            zorder=1,
+        )
+    for col, label in enumerate(["Ingest (Autoloader)", "Bronze", "Contract gate", "Silver", "Gold / checks"]):
+        ax.text(col * xgap, 2.75, label, ha="center", fontsize=9.5, color=INK_2)
+    ax.set_xlim(-w / 2 - 0.2, 4 * xgap + w / 2 + 0.2)
+    ax.set_ylim(-3.95, 3.0)
+    ax.axis("off")
+    fig.suptitle(
+        "The pipeline as it ran on Databricks Free Edition - rows per table, expectations from the event log",
+        x=0.01,
+        ha="left",
+        fontsize=12.5,
+        color=INK,
+        fontweight="bold",
+    )
+    fig.text(0.01, 0.905, snap.get("note", ""), fontsize=9.5, color=INK_2)
+    fig.tight_layout(rect=(0, 0, 1, 0.9))
+    fig.savefig(OUT / "pipeline_lineage_free_edition.png", dpi=160)
+    plt.close(fig)
+
+
 def main(argv):
     OUT.mkdir(parents=True, exist_ok=True)
     pipeline_counts()
     census_by_unit()
+    snapshots = sorted((REPO / "docs" / "comparisons" / "results").glob("workspace_*.json"))
+    if snapshots:
+        pipeline_lineage(snapshots[-1])
     reports = sorted((REPO / "evals" / "reports").glob("golden_*.json"))
     report = Path(argv[0]) if argv else (reports[-1] if reports else None)
     if report:

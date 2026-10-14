@@ -1,7 +1,7 @@
-# Databricks Asset Bundle definition. `databricks bundle validate -t dev`
-# passes against the project's GCP trial workspace; nothing has been
-# deployed yet. CI (.github/workflows/bundle-validate.yml) validates only
-# when DATABRICKS_HOST / DATABRICKS_TOKEN repo secrets exist.
+# Databricks Asset Bundle definition. Deployed and run on the `free` target
+# (Databricks Free Edition) and earlier on `dev` (a GCP trial workspace, now
+# locked). CI (.github/workflows/bundle-validate.yml) validates only when
+# DATABRICKS_HOST / DATABRICKS_TOKEN repo secrets exist.
 bundle:
   name: databricks-agentic-de
 
@@ -53,6 +53,21 @@ targets:
     # Free-trial settings: no Kafka (a cloud pipeline can't reach a laptop
     # broker), landing files in a UC volume instead of a GCS bucket, and the
     # streaming pipeline triggered on demand instead of running 24/7.
+    variables:
+      patient_events_source: files
+      provider_landing_path: /Volumes/healthcare_agentic_de/bronze/landing/providers
+    resources:
+      pipelines:
+        streaming_patient_pipeline:
+          continuous: false
+
+  # Databricks Free Edition (serverless, no cost, doesn't expire) - where the
+  # project runs since the GCP trial workspace locked sign-in (2026-10-15).
+  # Same settings as dev. CLI profile: `databricks auth login --profile free`.
+  free:
+    mode: development
+    workspace:
+      host: https://dbc-df9bb74b-bd33.cloud.databricks.com
     variables:
       patient_events_source: files
       provider_landing_path: /Volumes/healthcare_agentic_de/bronze/landing/providers
