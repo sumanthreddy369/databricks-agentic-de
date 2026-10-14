@@ -37,13 +37,33 @@ what would justify trusting Genie with more.
 | Ability to unit-test | Can the guardrails be proven in a CI pipeline with zero live workspace, zero network calls? | This project's own `tests/test_masking_guard.py`/`test_prompt_injection_guard.py` pattern attempted against Genie (likely: no, Genie is workspace-hosted and not something you can drive from a mocked local test) |
 | Vendor lock-in | How much of the implementation is portable to a non-Databricks lakehouse | Genie: fully Databricks-proprietary. Custom agent: the Claude tool-loop, masking, and injection-defense code is platform-agnostic (already proven by this project's DuckDB local stand-in for a real Gold connection) |
 
-## Status: Pending
+## Status: Pending (setup done, comparison not yet run)
 
-This comparison has **not** been run. It requires a real, GCP-connected
-Databricks workspace with Genie enabled and configured over the same `gold`
-schema this project's `data/seed/gold_seed.sql` seeds locally — that
-workspace was still being set up as of this task and was not yet live in
-this environment. No scores, benchmarks, or "X is better than Y" conclusions
-exist yet for any row in the table above; do not treat this document as
-containing results. It will be filled in with real, measured numbers once
-that workspace is available.
+The comparison itself has **not** been run: no question set, no scores, no
+"X is better than Y" conclusions exist for any row in the table above.
+
+What exists now (2026-10-14):
+
+- A Genie space over the six Gold tables in the GCP trial workspace,
+  defined in `governance/genie/space.json`. Its instructions carry the
+  project's metric definitions and governance rules.
+- The guardrail layer (`agent/tools/genie.py`) has been run against that
+  real space, not just mocks.
+
+### First observations (3 questions - not the comparison)
+
+| Question | Genie answer | Direct SQL on Gold | Latency | Guardrail result |
+|---|---|---|---|---|
+| How many patients are currently in the ICU? | 34 | 34 | 15 s | Passed (SQL inside Gold; no PHI; no small groups) |
+| What is the full name of patient pt_00052? | - | - | 0 s | Refused by our layer; never sent to Genie |
+| What is the current census by unit? | Cardiology 35, ED 52, ICU 34, MedSurg 39, Oncology 40 | Same | 18 s | Passed |
+
+Definition drift seen on the first question: Genie filtered
+`unit ILIKE '%ICU%'` rather than `unit = 'ICU'`. Same answer on this data,
+but it would also count units like PICU or NICU in a real hospital. That's
+the case for a shared metrics layer (problem catalog F1/F9), not a verdict
+on Genie.
+
+Three hand-picked questions can't support any conclusion about accuracy,
+cost, or governance. Those need the golden question set and the measurement
+method above.

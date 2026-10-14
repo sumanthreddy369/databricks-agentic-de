@@ -1,0 +1,80 @@
+{
+  "title": "Healthcare Agentic DE - Clinical Ops (Gold)",
+  "description": "Genie over the governed Gold tables of databricks-agentic-de (synthetic data). Patient identifiers are masked by Unity Catalog. Questions reach this space through the project's guardrail layer (agent/tools/genie.py).",
+  "space": {
+    "version": 2,
+    "config": {
+      "sample_questions": [
+        {"id": "a1000000000000000000000000000001", "question": ["How many patients are currently in the ICU?"]},
+        {"id": "a1000000000000000000000000000002", "question": ["What is the current census by unit?"]},
+        {"id": "a1000000000000000000000000000003", "question": ["What was the average heart rate by unit in the latest 15-minute window?"]},
+        {"id": "a1000000000000000000000000000004", "question": ["How many providers do we have per specialty?"]}
+      ]
+    },
+    "data_sources": {
+      "tables": [
+        {"identifier": "healthcare_agentic_de.gold.dim_patients"},
+        {"identifier": "healthcare_agentic_de.gold.dim_providers"},
+        {"identifier": "healthcare_agentic_de.gold.fct_encounter_history"},
+        {"identifier": "healthcare_agentic_de.gold.fct_encounters"},
+        {"identifier": "healthcare_agentic_de.gold.fct_vitals"},
+        {"identifier": "healthcare_agentic_de.gold.gold_live_vitals_by_unit"}
+      ]
+    },
+    "instructions": {
+      "text_instructions": [
+        {
+          "id": "b1000000000000000000000000000001",
+          "content": [
+            "Metric definitions (shared with the project's fallback agent; use these, not your own):\n",
+            "* Current census = count of encounters in fct_encounters with status = 'in-progress', grouped by unit when asked per unit.\n",
+            "* Census at a past time T = count of distinct patient_id in fct_encounter_history where valid_from <= T and (valid_to IS NULL OR valid_to > T) and status = 'in-progress'. fct_encounters only holds current state.\n",
+            "* fct_encounter_history has one row per version of an encounter; never count its rows as encounters.\n",
+            "* Live vitals: gold_live_vitals_by_unit has one row per unit per 15-minute window. The newest window may still be filling; say so when reporting it. Combine windows with sum(avg_heart_rate * reading_count) / sum(reading_count), never avg(avg_heart_rate).\n",
+            "* Out-of-range heart rate = outside 55-140 bpm (clinical alert band, not a physical-impossibility filter).\n",
+            "Governance:\n",
+            "* full_name and mrn are masked by policy and show ***REDACTED***. Never try to reveal, infer or reconstruct them.\n",
+            "* Don't report a group that covers fewer than 11 patients; say it is too small to report.\n",
+            "* All data is synthetic (simulated), not real patients."
+          ]
+        }
+      ],
+      "example_question_sqls": [
+        {
+          "id": "c1000000000000000000000000000001",
+          "question": ["What is the current census by unit?"],
+          "sql": [
+            "SELECT unit, count(*) AS current_census\n",
+            "FROM healthcare_agentic_de.gold.fct_encounters\n",
+            "WHERE status = 'in-progress'\n",
+            "GROUP BY unit\n",
+            "ORDER BY unit"
+          ]
+        },
+        {
+          "id": "c1000000000000000000000000000002",
+          "question": ["How many patients were in the ED at a given time?"],
+          "sql": [
+            "SELECT count(DISTINCT patient_id) AS census\n",
+            "FROM healthcare_agentic_de.gold.fct_encounter_history\n",
+            "WHERE unit = 'ED' AND status = 'in-progress'\n",
+            "  AND valid_from <= TIMESTAMP '2026-10-07 02:25:00'\n",
+            "  AND (valid_to IS NULL OR valid_to > TIMESTAMP '2026-10-07 02:25:00')"
+          ]
+        },
+        {
+          "id": "c1000000000000000000000000000003",
+          "question": ["Average heart rate by unit across all windows"],
+          "sql": [
+            "SELECT unit,\n",
+            "  round(sum(avg_heart_rate * reading_count) / sum(reading_count), 1) AS avg_heart_rate,\n",
+            "  sum(out_of_range_count) AS out_of_range_readings\n",
+            "FROM healthcare_agentic_de.gold.gold_live_vitals_by_unit\n",
+            "GROUP BY unit\n",
+            "ORDER BY unit"
+          ]
+        }
+      ]
+    }
+  }
+}
