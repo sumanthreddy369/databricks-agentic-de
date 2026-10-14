@@ -143,9 +143,9 @@ def silver_patient_admissions():
 @dlt.table(
     name="silver_patient_identity_conflicts",
     comment=(
-        "Data-quality check (problem catalog M2): readmitted patient_ids whose name or birth date changed "
-        "between admissions. Counts only - no names. A data steward decides; records are never merged "
-        "automatically."
+        "Data-quality check (problem catalog M2): patient_ids admitted more than once with a different "
+        "name or birth date - two people on one id. Counts only - no names. A data steward decides; "
+        "records are never merged automatically."
     ),
 )
 @dlt.expect("one_identity_per_patient_id", "names = 1 AND birth_dates = 1")

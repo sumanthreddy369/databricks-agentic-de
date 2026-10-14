@@ -177,10 +177,17 @@ def summarize(con) -> dict:
     return s
 
 
-def vital_histograms(con) -> None:
+def vital_histograms(con, out: Path, title: str, subtitle: str) -> None:
     fig, axes = plt.subplots(2, 3, figsize=(10, 5.2))
     for ax, f in zip(axes.ravel(), VITAL_ITEM_TYPES, strict=True):
-        values = [r[0] for r in con.sql(f"SELECT vital.value FROM ev WHERE vital.itemid = '{f}'").fetchall()]
+        # What Silver keeps: physically impossible readings are dropped there.
+        plo, phi = PHYSIOLOGIC_LIMITS[f]
+        values = [
+            r[0]
+            for r in con.sql(
+                f"SELECT vital.value FROM ev WHERE vital.itemid = '{f}' AND vital.value BETWEEN {plo} AND {phi}"
+            ).fetchall()
+        ]
         lo, hi = VITAL_RANGES[f]
         ax.axvspan(lo, hi, color=BAND, zorder=0)
         # Values are rounded to 0.1, so bin edges sit on whole multiples of the
@@ -194,7 +201,7 @@ def vital_histograms(con) -> None:
         for side in ("top", "right", "left"):
             ax.spines[side].set_visible(False)
     fig.suptitle(
-        "Every vital is flat inside its alert band (shaded), with a thin tail outside",
+        title,
         x=0.01,
         ha="left",
         fontsize=12,
@@ -204,12 +211,12 @@ def vital_histograms(con) -> None:
     fig.text(
         0.01,
         0.905,
-        "99,536 readings from the landed stream. Real vitals cluster around a normal value; these are uniform.",
+        subtitle,
         fontsize=9.5,
         color=INK_2,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.9))
-    fig.savefig(OUT / "vital_distributions.png", dpi=160)
+    fig.savefig(out / "vital_distributions.png", dpi=160)
     plt.close(fig)
 
 
@@ -331,20 +338,43 @@ def detector_comparison() -> None:
     plt.close(fig)
 
 
-def main() -> int:
-    OUT.mkdir(parents=True, exist_ok=True)
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--events", default=EVENTS, help="directory of patient-event JSON-lines files")
+    parser.add_argument("--out", default=str(OUT), help="where to write the summary and charts")
+    parser.add_argument("--physiology", action="store_true", help="titles for the physiology simulator's data")
+    args = parser.parse_args(argv)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    events = Path(args.events).as_posix()
     con = duckdb.connect()
     con.execute(
-        f"CREATE VIEW ev AS SELECT * FROM read_json_auto('{EVENTS}/*.jsonl', union_by_name=true, filename=true)"
+        f"CREATE VIEW ev AS SELECT * FROM read_json_auto('{events}/*.jsonl', union_by_name=true, filename=true)"
     )
     con.execute(
         f"CREATE VIEW pr AS SELECT * FROM read_json_auto('{PROVIDERS}/*.jsonl', union_by_name=true, filename=true)"
     )
     summary = summarize(con)
-    (OUT / "eda_summary.json").write_text(json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8")
-    vital_histograms(con)
-    model_vs_rule()
-    detector_comparison()
+    (out / "eda_summary.json").write_text(json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8")
+    readings = sum(v["n"] for v in summary["vitals"])
+    if args.physiology:
+        title = "With physiology, vitals cluster around each patient's normal"
+        subtitle = (
+            f"{readings:,} readings, regenerated with simulator/physiology.py. Alert band shaded; "
+            "impossible values (Silver drops them) not shown."
+        )
+    else:
+        title = "Every vital is flat inside its alert band (shaded), with a thin tail outside"
+        subtitle = (
+            f"{readings:,} landed readings. Real vitals cluster around a normal value; these are uniform. "
+            "Impossible values not shown."
+        )
+    vital_histograms(con, out, title, subtitle)
+    if out == OUT:
+        model_vs_rule()
+        detector_comparison()
     print(json.dumps(summary, indent=1, default=str))
     return 0
 

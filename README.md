@@ -50,7 +50,8 @@ Cloud Run haven't run. No real-model (Claude) eval results exist yet.
 **Data and model checked:**
 
 - An EDA of all 103,301 landed events found the pipeline input clean, one
-  identity defect on readmission, and simulated vitals with no physiology.
+  identity defect (random patient-id collisions: two people, one id), and
+  simulated vitals with no physiology.
 - The first anomaly model did worse than a plain range rule.
 - The simulator now has physiology. On it, a retrained model catches 61% of
   deteriorating patients at NEWS2's false-alarm rate (NEWS2: 47%). It runs
@@ -962,7 +963,7 @@ live infrastructure, or pure planning with no implementation at all
 | CI — lint + test (`.github/workflows/ci.yml`) | Complete |
 | CI — bundle validate (`.github/workflows/bundle-validate.yml`) | Complete (its skip path is what actually runs here; `databricks bundle validate` itself is untested) |
 | Lakeflow (DLT) medallion pipeline (`pipeline/`) | Runs - deployed to the GCP trial workspace (dev, serverless, triggered) and run end to end on synthetic data; layer counts reconcile. Dataset graph also checked statically by `tests/test_dlt_pipeline_graph.py`. Not yet run continuously or on a Kafka source |
-| Patient identity check (`silver_patient_identity_conflicts`, problem catalog M2) | Partial - flags readmitted patient_ids whose name or birth date changed (warn-only; counts, never names; a steward decides). Graph-tested; the EDA found 13 such patients in the landed data. Not yet run on the workspace |
+| Patient identity check (`silver_patient_identity_conflicts`, problem catalog M2) | Partial - flags patient_ids admitted more than once with a different name or birth date: two people on one id (warn-only; counts, never names; a steward decides). Graph-tested; its logic finds all 23 collisions injected into the regenerated data (13 accidental ones in the original). Not yet run on the workspace |
 | Unity Catalog masks + row filters (`governance/05_unity_catalog/`, declared in `pipeline/04_gold/`) | Partial - column masks verified on the workspace (all names/MRNs redacted in Gold); row filter attached but not tested with a restricted group; grants and account groups not applied (`CREATE GROUP` isn't how account groups are created) |
 | Databricks Asset Bundle (`databricks.yml`, `resources/*.yml`) | Runs - deployed to the dev target; the agent healthcheck job is prod-only until it's reworked for serverless (the trial workspace is serverless-only) |
 | Databricks Vector Search knowledge tool (`agent/tools/knowledge_search.py`) | Stubbed — real graceful-degradation code path, never queried a live index |

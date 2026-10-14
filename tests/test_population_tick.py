@@ -49,3 +49,21 @@ def test_tick_never_sleeps_and_is_driven_purely_by_injected_now():
     second = population.tick(t0)
     assert [e.event_type for e in first if e.event_type == "vitals_reading"] == []
     assert [e.event_type for e in second if e.event_type == "vitals_reading"] == []
+
+
+def test_patient_ids_are_unique_by_default():
+    """The old pt_00000-pt_99999 space gave ~13 accidental collisions in a
+    1,400-patient feed (two different people, one patient_id)."""
+    population = Population(target_size=0, rng=random.Random(11))
+    events = population.admit_new_patients(5000, datetime(2026, 1, 1, tzinfo=UTC))
+    ids = [e.patient_id for e in events]
+    assert len(set(ids)) == len(ids)
+    assert population.identity_collisions == 0
+
+
+def test_identity_collisions_are_injected_only_on_request():
+    population = Population(target_size=0, rng=random.Random(12), identity_collision_rate=0.05)
+    events = population.admit_new_patients(2000, datetime(2026, 1, 1, tzinfo=UTC))
+    ids = [e.patient_id for e in events]
+    assert population.identity_collisions > 50
+    assert len(ids) - len(set(ids)) == population.identity_collisions

@@ -17,8 +17,10 @@ Every number below is in `eda_summary.json` or `model_eval.json`.
   out-of-order events, or broken encounter lifecycles. Silver's 99,213
   vitals rows are exactly 99,536 readings minus 323 physically impossible
   ones.
-- **One real data-quality defect:** all 13 readmitted patients came back
-  with a different name and birth date under the same `patient_id`.
+- **One real data-quality defect:** 13 `patient_id`s belong to two
+  different people (different name and birth date). They aren't
+  readmissions: the simulator drew ids from only 100,000 values, so ids
+  collided by chance - and 3 pairs were even in hospital at the same time.
 - **The vitals aren't physiological.** Each one is uniform across its alert
   band and independent of every other vital, the patient and the unit.
 - **So the anomaly model can't work, and it doesn't.** It catches 26% of
@@ -63,18 +65,29 @@ ranges as everyone else.
 | Transfers to the same unit | 0 |
 | Vital readings outside the alert band | 3,083 (about 3% per vital, by design) |
 | Physically impossible readings | 323: 300 SpO2 above 100%, 23 respiratory rates of 0 |
-| **Readmitted patients whose identity changed** | **13 of 13: new name and birth date; 8 new gender, 11 new region** |
+| **patient_ids used by two different people** | **13 (all with a different name and birth date; 3 pairs in hospital at the same time)** |
 
 The impossible readings are exactly what Silver's `plausible_vital_value`
 expectation drops: 99,536 - 323 = 99,213, the Silver row count measured on
 the workspace.
 
-The identity drift is a real defect. The simulator builds a fresh patient
-record on readmission but reuses the `patient_id`. In Gold, `dim_patients`
-keeps the latest version (SCD1), so those 13 patients' earlier encounters
-now show someone else's demographics. A real feed would raise this as a
-master-patient-index conflict (problem catalog: identity / matching). The
-pipeline doesn't detect it yet.
+The identity defect is real, and its cause was found while regenerating
+the data. `simulator/domain.py` drew patient ids from `pt_00000`-`pt_99999`.
+With about 1,400 patients the birthday paradox predicts about 10
+collisions; there were 13. Two people sharing an id is exactly what a
+master-patient-index conflict looks like in a real feed (problem catalog
+M2). In Gold, `dim_patients` keeps the latest version (SCD1), so the first
+person's encounters show the second person's demographics.
+
+What changed:
+
+- **Detection.** Silver now flags it (`silver_patient_identity_conflicts`,
+  warn-only, counts only).
+- **Simulator.** Ids are unique by default (32 random bits). Collisions are
+  now injected only on request (`--identity-collision-rate`), so the check
+  can be measured.
+- **Measured.** In the regenerated data (below), 23 collisions were
+  injected, and the check's logic finds all 23.
 
 ## The vitals
 
@@ -197,3 +210,34 @@ patients. The rules still decide what they can see: the model scores SpO2
   70% of it and model v2 on 94%. Regenerating it with the new simulator
   needs a workspace login.
 - The full tables are in [results.md](../results.md).
+
+## The regenerated dataset (v2)
+
+The same 10 simulated minutes (02:18-02:28 on 2026-10-07, so the golden
+set's point-in-time questions still apply), regenerated with physiology and
+23 deliberate identity collisions:
+
+```bash
+uv run python -m simulator.file_feed --patients 200 --duration 600     --end 2026-10-07T02:28:34.709858Z --seed 20261014     --identity-collision-rate 0.01 --output-dir data/landing_v2/patient_events
+uv run --with matplotlib python scripts/eda_landing.py     --events data/landing_v2/patient_events --out docs/eda/v2 --physiology
+```
+
+![Vitals in the regenerated data](v2/vital_distributions.png)
+
+| | Original (v1) | Regenerated (v2) |
+|---|---|---|
+| Events / patients / encounters | 103,301 / 1,388 / 1,401 | 103,407 / 1,359 / 1,382 |
+| Mean heart rate (SD) | 97.3 (26.6), flat 55-140 | 82.2 (10.2), bell-shaped |
+| Heart-rate variance explained by the encounter | 7% (noise) | 78% |
+| Blood pressure variance explained by the encounter | 8% | 69-74% |
+| Mean heart rate, ICU vs MedSurg | 97.1 vs 97.6 | 85.5 vs 79.4 |
+| Readings outside the alert band | 3,083 (by design) | 603 (mostly deterioration episodes) |
+| Physically impossible readings | 323 | 241 (device artifacts) |
+| patient_ids used by two people | 13 (accidental) | 23 (injected); the Silver check's logic finds all 23 |
+
+SpO2 and temperature vary less between patients than within them, so
+their shares are lower (19% and 15%); temperature's is also diluted by
+the Fahrenheit-as-Celsius artifacts. 6 pairs of events have identical
+content - two people on one id read at the same instant - which is the
+kind of duplicate Silver's dedup must not merge.
+

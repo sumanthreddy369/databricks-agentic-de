@@ -796,11 +796,11 @@ layers:
     title: Patient identity mismatch
     description: Same person under two patient_ids, or one patient_id carrying two people (name or birth date changes between admissions); MRN merges and splits. Counts and SCD1 demographics go wrong.
     who: DE + DA
-    detect: silver_patient_identity_conflicts and its one_identity_per_patient_id expectation (readmitted patient_ids with more than one name or birth date); candidate duplicates; MRN merge events.
+    detect: silver_patient_identity_conflicts and its one_identity_per_patient_id expectation (patient_ids admitted more than once with more than one name or birth date); candidate duplicates; MRN merge events.
     action: Report the conflicting patient_ids (counts, never names) to data stewards; never merge or split records automatically.
     level: L1
     status: partial
-    status_note: 'One patient_id with conflicting identities is flagged in Silver (warn-only, graph-tested); found 13 in the EDA. Not yet run on the workspace. Same person under two ids not detected yet.'
+    status_note: 'One patient_id with conflicting identities is flagged in Silver (warn-only, graph-tested); found 13 accidental simulator id collisions in the EDA; finds all 23 injected into the regenerated data. Not yet run on the workspace. Same person under two ids not detected yet.'
   - id: M3
     title: Orphan keys
     description: Encounters reference providers or units not in dim_providers because the roster lags.

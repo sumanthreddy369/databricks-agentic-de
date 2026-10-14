@@ -316,7 +316,7 @@ def story(fx):
             ["Gold", "dim_patients, fct_encounters, fct_encounter_history, fct_vitals, dim_providers, live vitals", "Readings attributed to the unit at reading time", "pipeline/04_gold/", "Runs on Databricks"],
             ["Govern", "Masks on full_name / mrn declared in the pipeline; unit row filter", "Agent never sees raw identifiers", "pipeline/04_gold/, governance/", "Partial - masks verified; row filter untested"],
         ],
-        notes=["EDA of the same 103,301 events (docs/eda/): no duplicates, late events or broken lifecycles; 13 readmitted patients changed identity - not yet caught by the pipeline."],
+        notes=["EDA of the same 103,301 events (docs/eda/): no duplicates, late events or broken lifecycles; 13 patient_ids shared by two people (random id collisions) - now flagged in Silver."],
     )
     s += workflow(
         "W2. Analyst question",
@@ -430,7 +430,7 @@ def story(fx):
             ["Measurement", "How", "Result so far", "Code", "Status"],
             ["Golden question set", "python -m evals.golden.run (live), .rescore (offline replay)", "Run 2 with current guard: 21/21 answers, 6/6 probes; Genie alone failed 1 probe", "evals/golden/", "Measured"],
             ["Latency", "Same runs", "Genie p50 13.4 s, p90 17.1 s; metric path 1.3 s", "evals/golden/run.py", "Measured"],
-            ["EDA", "scripts/eda_landing.py (DuckDB over raw JSON)", "Input clean; identity drift on readmission; vitals not physiological", "docs/eda/", "Measured"],
+            ["EDA", "scripts/eda_landing.py (DuckDB over raw JSON)", "Input clean; 13 patient-id collisions; vitals not physiological", "docs/eda/", "Measured"],
             ["Detectors", "python -m ml.evaluate_anomaly_model", "Round 1: model v1 worse than the range rule. Round 2: v2 61% vs NEWS2 47% at equal false alarms", "ml/evaluate_anomaly_model.py", "Measured - v2 promoted as a calibrated third layer"],
             ["Human work", "python -m agent.human_work", "Counts requests, who needed a person, decision times", "agent/human_work.py", "Tested locally - no real usage yet"],
         ],

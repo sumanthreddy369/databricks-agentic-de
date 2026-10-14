@@ -94,7 +94,9 @@ _VALUEUOM_BY_ITEM = {
 
 
 def generate_patient_snapshot(patient_id: str | None = None) -> PatientSnapshot:
-    pid = patient_id or f"pt_{random.randint(0, 99999):05d}"
+    # 32 random bits: the earlier pt_00000-pt_99999 space gave ~13 accidental
+    # collisions (two people, one id) in a 1,400-patient feed - see docs/eda/.
+    pid = patient_id or f"pt_{random.getrandbits(32):08x}"
     full_name = f"{random.choice(_FIRST_NAMES)} {random.choice(_LAST_NAMES)}"
     birth_year = random.randint(1935, 2020)
     return PatientSnapshot(

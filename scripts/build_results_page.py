@@ -169,7 +169,7 @@ def eda() -> list[str]:
                 f"{c['vitals_before_admission']} / {c['vitals_after_discharge']}",
             ],
             [
-                "Readmitted patients whose identity changed",
+                "patient_ids used by two different people",
                 f"**{s['patient_identity_drift']['name_changed']} of {s['patient_identity_drift']['readmitted']}**",
             ],
         ],

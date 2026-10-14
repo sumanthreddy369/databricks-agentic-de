@@ -277,8 +277,8 @@ def test_expectations_reference_output_columns_not_nested_fields(pipelines):
 
 
 def test_patient_identity_conflicts_are_flagged_not_dropped(pipelines):
-    """Problem catalog M2, found by the EDA (13 readmitted patients changed
-    name and birth date): Silver flags patient_ids with conflicting identities.
+    """Problem catalog M2, found by the EDA (13 patient_ids shared by two
+    people): Silver flags patient_ids with conflicting identities.
     Warn-only - a steward decides; rows are never dropped or merged - and it
     sits downstream of the contract gate."""
     graph = pipelines["streaming_patient_pipeline"]

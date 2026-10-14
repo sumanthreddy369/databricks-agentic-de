@@ -91,7 +91,7 @@ Runs 1 and 2 are as scored at the time. Run 2's Genie columns include a scorer b
 | Encounters without admission | 0 |
 | Discharged before admitted | 0 |
 | Vitals before admission / after discharge | 0 / 0 |
-| Readmitted patients whose identity changed | **13 of 13** |
+| patient_ids used by two different people | **13 of 13** |
 
 | Vital | Mean | SD | Median | Outside alert band | Physically impossible |
 |---|---|---|---|---|---|

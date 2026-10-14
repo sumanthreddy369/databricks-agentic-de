@@ -19,6 +19,7 @@ before now (no future timestamps for the pipeline's clock-skew checks) and a
 Files are written locally; uploading them is a separate, explicit step.
 """
 
+import random
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -90,12 +91,37 @@ def run(
     duration: int = typer.Option(600, help="Simulated seconds of activity, ending now."),
     seconds_per_file: int = typer.Option(60, help="Simulated seconds of events per file."),
     output_dir: str = typer.Option(DEFAULT_OUTPUT_DIR, help="Local directory to write files into."),
+    end: str = typer.Option(
+        "",
+        help="Simulated end time, ISO 8601 (default: now). Reuse a window to keep "
+        "point-in-time questions meaningful.",
+    ),
+    seed: int = typer.Option(-1, help="Random seed for a reproducible feed (default: unseeded)."),
+    identity_collision_rate: float = typer.Option(
+        0.0, help="Share of admissions that are a different person reusing an issued patient_id (catalog M2)."
+    ),
 ) -> None:
+    if seed >= 0:
+        random.seed(seed)
+    population = Population(
+        target_size=patients,
+        rng=random.Random(seed) if seed >= 0 else None,
+        identity_collision_rate=identity_collision_rate,
+    )
     files = generate_files(
-        Path(output_dir), patients=patients, duration=duration, seconds_per_file=seconds_per_file
+        Path(output_dir),
+        patients=patients,
+        duration=duration,
+        seconds_per_file=seconds_per_file,
+        end=datetime.fromisoformat(end.replace("Z", "+00:00")) if end else None,
+        population=population,
     )
     events = sum(len(f.read_bytes().splitlines()) for f in files)
     console.print(f"[bold green]Wrote {events} events in {len(files)} files to {output_dir}[/]")
+    if population.identity_collisions:
+        console.print(
+            f"Injected {population.identity_collisions} identity collisions (two people, one patient_id)"
+        )
 
 
 if __name__ == "__main__":

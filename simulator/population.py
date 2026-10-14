@@ -54,15 +54,30 @@ def _jittered_next_due(now: datetime) -> datetime:
 
 
 class Population:
-    def __init__(self, target_size: int = 1000, rng: random.Random | None = None) -> None:
+    def __init__(
+        self, target_size: int = 1000, rng: random.Random | None = None, identity_collision_rate: float = 0.0
+    ) -> None:
+        """`identity_collision_rate`: chance that a new admission is a different
+        person given an already-issued patient_id - the real-world identity
+        defect (problem catalog M2), injected on purpose so the Silver check
+        can be measured. 0 by default: ids are unique."""
         self.target_size = target_size
         self._rng = rng or random
         self.active: dict[str, ActiveEncounter] = {}  # keyed by encounter_id
+        self.identity_collision_rate = identity_collision_rate
+        self.issued_patient_ids: list[str] = []
+        self.identity_collisions = 0
 
     def admit_new_patients(self, count: int, now: datetime) -> list[PatientEvent]:
         events: list[PatientEvent] = []
         for _ in range(count):
-            patient = generate_patient_snapshot()
+            if self.issued_patient_ids and self._rng.random() < self.identity_collision_rate:
+                patient_id = self._rng.choice(self.issued_patient_ids)
+                self.identity_collisions += 1
+            else:
+                patient_id = f"pt_{self._rng.getrandbits(32):08x}"
+                self.issued_patient_ids.append(patient_id)
+            patient = generate_patient_snapshot(patient_id)
             encounter_id = f"enc_{uuid.uuid4().hex[:8]}"
             event = generate_admitted_event(patient, encounter_id)
             events.append(event)

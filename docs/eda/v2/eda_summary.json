@@ -1,0 +1,405 @@
+{
+  "volume": {
+    "events": 103407,
+    "distinct_event_ids": 103407,
+    "patients": 1359,
+    "encounters": 1382,
+    "files": 10,
+    "first_event": "2026-10-07 02:18:34.709858",
+    "last_event": "2026-10-07 02:28:34.709858",
+    "schema_versions": 1
+  },
+  "event_types": [
+    {
+      "event_type": "vitals_reading",
+      "n": 99593
+    },
+    {
+      "event_type": "admitted",
+      "n": 1382
+    },
+    {
+      "event_type": "transferred",
+      "n": 1250
+    },
+    {
+      "event_type": "discharged",
+      "n": 1182
+    }
+  ],
+  "vitals": [
+    {
+      "itemid": "dbp",
+      "unit": "mmHg",
+      "n": 16626,
+      "mean": 73.95,
+      "sd": 10.4,
+      "min": 0.0,
+      "p01": 50.6,
+      "median": 73.9,
+      "p99": 98.0,
+      "max": 111.3,
+      "outside_alert_band": 232,
+      "physically_impossible": 40
+    },
+    {
+      "itemid": "heart_rate",
+      "unit": "bpm",
+      "n": 16618,
+      "mean": 82.24,
+      "sd": 10.19,
+      "min": 0.0,
+      "p01": 59.5,
+      "median": 82.2,
+      "p99": 105.3,
+      "max": 114.2,
+      "outside_alert_band": 59,
+      "physically_impossible": 37
+    },
+    {
+      "itemid": "resp_rate",
+      "unit": "breaths/min",
+      "n": 16543,
+      "mean": 16.13,
+      "sd": 2.35,
+      "min": 0.0,
+      "p01": 10.7,
+      "median": 16.2,
+      "p99": 21.2,
+      "max": 26.2,
+      "outside_alert_band": 86,
+      "physically_impossible": 44
+    },
+    {
+      "itemid": "sbp",
+      "unit": "mmHg",
+      "n": 16620,
+      "mean": 117.57,
+      "sd": 14.64,
+      "min": 0.0,
+      "p01": 85.5,
+      "median": 118.1,
+      "p99": 146.9,
+      "max": 161.4,
+      "outside_alert_band": 158,
+      "physically_impossible": 52
+    },
+    {
+      "itemid": "spo2",
+      "unit": "%",
+      "n": 16566,
+      "mean": 96.58,
+      "sd": 3.09,
+      "min": 0.0,
+      "p01": 93.7,
+      "median": 96.7,
+      "p99": 99.6,
+      "max": 105.1,
+      "outside_alert_band": 29,
+      "physically_impossible": 29
+    },
+    {
+      "itemid": "temp_c",
+      "unit": "C",
+      "n": 16620,
+      "mean": 37.09,
+      "sd": 2.98,
+      "min": 35.8,
+      "p01": 36.2,
+      "median": 36.9,
+      "p99": 37.7,
+      "max": 99.5,
+      "outside_alert_band": 39,
+      "physically_impossible": 39
+    }
+  ],
+  "checks": {
+    "duplicate_event_ids": 0,
+    "duplicate_contents": 6,
+    "missing_keys": 0,
+    "transfers_to_same_unit": 0,
+    "encounters_without_admission": 0,
+    "encounters_admitted_or_discharged_twice": 0,
+    "discharged_before_admitted": 0,
+    "vitals_before_admission": 0,
+    "vitals_after_discharge": 0,
+    "still_open": 200,
+    "median_stay_seconds": 59.0
+  },
+  "late_or_out_of_order_events": 0,
+  "patient_identity_drift": {
+    "patients": 1359,
+    "readmitted": 23,
+    "name_changed": 21,
+    "gender_changed": 12,
+    "region_changed": 20,
+    "birth_date_changed": 23
+  },
+  "admissions_by_unit": [
+    {
+      "unit": "Cardiology",
+      "n": 286
+    },
+    {
+      "unit": "ED",
+      "n": 281
+    },
+    {
+      "unit": "ICU",
+      "n": 258
+    },
+    {
+      "unit": "MedSurg",
+      "n": 270
+    },
+    {
+      "unit": "Oncology",
+      "n": 287
+    }
+  ],
+  "admissions_by_type": [
+    {
+      "type": "emergency",
+      "n": 448
+    },
+    {
+      "type": "inpatient",
+      "n": 457
+    },
+    {
+      "type": "outpatient",
+      "n": 477
+    }
+  ],
+  "patients_by_age_band": [
+    {
+      "age_from": 0,
+      "n": 61
+    },
+    {
+      "age_from": 10,
+      "n": 153
+    },
+    {
+      "age_from": 20,
+      "n": 161
+    },
+    {
+      "age_from": 30,
+      "n": 157
+    },
+    {
+      "age_from": 40,
+      "n": 173
+    },
+    {
+      "age_from": 50,
+      "n": 174
+    },
+    {
+      "age_from": 60,
+      "n": 153
+    },
+    {
+      "age_from": 70,
+      "n": 174
+    },
+    {
+      "age_from": 80,
+      "n": 149
+    },
+    {
+      "age_from": 90,
+      "n": 25
+    }
+  ],
+  "mean_vital_by_unit": [
+    {
+      "unit": "Cardiology",
+      "itemid": "dbp",
+      "mean": 74.11
+    },
+    {
+      "unit": "ED",
+      "itemid": "dbp",
+      "mean": 74.22
+    },
+    {
+      "unit": "ICU",
+      "itemid": "dbp",
+      "mean": 72.0
+    },
+    {
+      "unit": "MedSurg",
+      "itemid": "dbp",
+      "mean": 74.98
+    },
+    {
+      "unit": "Oncology",
+      "itemid": "dbp",
+      "mean": 74.45
+    },
+    {
+      "unit": "Cardiology",
+      "itemid": "heart_rate",
+      "mean": 81.63
+    },
+    {
+      "unit": "ED",
+      "itemid": "heart_rate",
+      "mean": 82.46
+    },
+    {
+      "unit": "ICU",
+      "itemid": "heart_rate",
+      "mean": 85.54
+    },
+    {
+      "unit": "MedSurg",
+      "itemid": "heart_rate",
+      "mean": 79.42
+    },
+    {
+      "unit": "Oncology",
+      "itemid": "heart_rate",
+      "mean": 82.03
+    },
+    {
+      "unit": "Cardiology",
+      "itemid": "resp_rate",
+      "mean": 15.73
+    },
+    {
+      "unit": "ED",
+      "itemid": "resp_rate",
+      "mean": 16.25
+    },
+    {
+      "unit": "ICU",
+      "itemid": "resp_rate",
+      "mean": 17.07
+    },
+    {
+      "unit": "MedSurg",
+      "itemid": "resp_rate",
+      "mean": 15.59
+    },
+    {
+      "unit": "Oncology",
+      "itemid": "resp_rate",
+      "mean": 16.01
+    },
+    {
+      "unit": "Cardiology",
+      "itemid": "sbp",
+      "mean": 117.86
+    },
+    {
+      "unit": "ED",
+      "itemid": "sbp",
+      "mean": 116.98
+    },
+    {
+      "unit": "ICU",
+      "itemid": "sbp",
+      "mean": 115.17
+    },
+    {
+      "unit": "MedSurg",
+      "itemid": "sbp",
+      "mean": 119.07
+    },
+    {
+      "unit": "Oncology",
+      "itemid": "sbp",
+      "mean": 118.77
+    },
+    {
+      "unit": "Cardiology",
+      "itemid": "spo2",
+      "mean": 96.71
+    },
+    {
+      "unit": "ED",
+      "itemid": "spo2",
+      "mean": 96.38
+    },
+    {
+      "unit": "ICU",
+      "itemid": "spo2",
+      "mean": 96.06
+    },
+    {
+      "unit": "MedSurg",
+      "itemid": "spo2",
+      "mean": 96.94
+    },
+    {
+      "unit": "Oncology",
+      "itemid": "spo2",
+      "mean": 96.82
+    },
+    {
+      "unit": "Cardiology",
+      "itemid": "temp_c",
+      "mean": 37.0
+    },
+    {
+      "unit": "ED",
+      "itemid": "temp_c",
+      "mean": 37.2
+    },
+    {
+      "unit": "ICU",
+      "itemid": "temp_c",
+      "mean": 37.13
+    },
+    {
+      "unit": "MedSurg",
+      "itemid": "temp_c",
+      "mean": 37.09
+    },
+    {
+      "unit": "Oncology",
+      "itemid": "temp_c",
+      "mean": 37.03
+    }
+  ],
+  "readings_per_encounter": {
+    "mean": 75.2,
+    "min": 1,
+    "median": 53.0,
+    "max": 447
+  },
+  "between_encounter_variance_share": [
+    {
+      "itemid": "dbp",
+      "share": 0.74
+    },
+    {
+      "itemid": "heart_rate",
+      "share": 0.775
+    },
+    {
+      "itemid": "resp_rate",
+      "share": 0.713
+    },
+    {
+      "itemid": "sbp",
+      "share": 0.691
+    },
+    {
+      "itemid": "spo2",
+      "share": 0.19
+    },
+    {
+      "itemid": "temp_c",
+      "share": 0.145
+    }
+  ],
+  "providers": {
+    "rows": 30,
+    "providers": 30,
+    "files": 3
+  }
+}
