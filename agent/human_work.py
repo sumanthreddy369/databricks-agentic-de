@@ -158,7 +158,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="print JSON instead of markdown")
     args = parser.parse_args(argv)
 
-    until = datetime.now(UTC)
+    # The window ends now, inclusive. build() is half-open, and on Windows an
+    # entry written just before this call can carry the identical timestamp
+    # (coarse clock), which made tests/test_human_work_report.py flaky.
+    until = datetime.now(UTC) + timedelta(microseconds=1)
     since = until - timedelta(days=args.days)
     state_path = Path(args.state_path)
     approvals = (

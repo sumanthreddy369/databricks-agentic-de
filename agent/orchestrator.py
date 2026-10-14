@@ -130,9 +130,10 @@ DE_TOOLS = [
     {
         "name": "score_vitals_anomaly",
         "description": (
-            "Score one multi-vital reading (heart_rate, spo2, resp_rate, temp_c, sbp, dbp) for JOINT "
-            "anomaly risk via a local ONNX IsolationForest model — catches a plausible-looking "
-            "combination of vitals that a single-column range check would miss."
+            "Check one multi-vital reading (heart_rate, spo2, resp_rate, temp_c, sbp, dbp). Deterministic "
+            "rules decide (alert bands, physically impossible values, diastolic >= systolic) and are listed "
+            "in rule_findings; a local ONNX IsolationForest adds an advisory flag. Report which one fired "
+            "(decided_by) and never present the model's flag alone as the verdict."
         ),
         "input_schema": {
             "type": "object",

@@ -105,3 +105,48 @@ def test_score_vitals_anomaly_session_is_cached_across_calls(tiny_model_path, mo
 
     assert call_count["n"] == 1  # loaded once, reused on the next two calls
     anomaly_score._load_session.cache_clear()
+
+
+def test_rules_flag_an_out_of_band_vital_even_when_the_model_does_not(tiny_model_path, monkeypatch):
+    """Found by ml/evaluate_anomaly_model.py: the model missed 74% of panels
+    with one vital out of band. The range rule must decide those."""
+    from agent.tools import anomaly_score
+
+    class NeverFlags:
+        def get_inputs(self):
+            return [type("Input", (), {"name": "vitals_panel"})()]
+
+        def run(self, _outputs, _feed):
+            return [[[1]], [[0.2]]]
+
+    monkeypatch.setattr(anomaly_score, "_load_session", lambda _path: NeverFlags())
+
+    payload = json.loads(score_vitals_anomaly(NORMAL_VITALS | {"spo2": 80}, model_path=tiny_model_path).content)
+
+    assert payload["is_anomaly"] is True
+    assert payload["model_is_anomaly"] is False
+    assert payload["decided_by"] == "rules"
+    assert payload["rule_findings"] == ["spo2=80 is below the alert band 88-100"]
+
+
+def test_rules_catch_an_impossible_pair_with_every_value_in_band(tiny_model_path):
+    payload = json.loads(
+        score_vitals_anomaly(NORMAL_VITALS | {"sbp": 90, "dbp": 95}, model_path=tiny_model_path).content
+    )
+
+    assert payload["is_anomaly"] is True
+    assert "rules" in payload["decided_by"]
+    assert payload["rule_findings"] == ["dbp=95 is not below sbp=90 (impossible pair)"]
+
+
+def test_physically_impossible_value_is_named_as_such(tiny_model_path):
+    payload = json.loads(score_vitals_anomaly(NORMAL_VITALS | {"spo2": 104}, model_path=tiny_model_path).content)
+
+    assert payload["rule_findings"] == ["spo2=104 is physically impossible (possible: 1-100)"]
+
+
+def test_a_normal_reading_fires_no_rule(tiny_model_path):
+    payload = json.loads(score_vitals_anomaly(NORMAL_VITALS, model_path=tiny_model_path).content)
+
+    assert payload["rule_findings"] == []
+    assert payload["model_status"].startswith("advisory")

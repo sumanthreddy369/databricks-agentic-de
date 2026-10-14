@@ -1,0 +1,137 @@
+{
+  "model": "ml/models/vitals_anomaly.onnx",
+  "seed": 20261014,
+  "test_sets": {
+    "normal": {
+      "n": 2000,
+      "should_flag": false,
+      "model_flag_rate": 0.0025,
+      "range_rule_flag_rate": 0.0
+    },
+    "one_vital_out_of_band": {
+      "n": 500,
+      "should_flag": true,
+      "model_flag_rate": 0.264,
+      "range_rule_flag_rate": 1.0
+    },
+    "diastolic_at_or_above_systolic": {
+      "n": 500,
+      "should_flag": true,
+      "model_flag_rate": 0.01,
+      "range_rule_flag_rate": 0.0
+    },
+    "respiratory_distress_pattern": {
+      "n": 500,
+      "should_flag": true,
+      "model_flag_rate": 0.018,
+      "range_rule_flag_rate": 0.0
+    },
+    "shock_pattern": {
+      "n": 500,
+      "should_flag": true,
+      "model_flag_rate": 0.066,
+      "range_rule_flag_rate": 0.0
+    }
+  },
+  "overall": {
+    "model": {
+      "precision": 0.9728,
+      "recall": 0.0895,
+      "true_positives": 179,
+      "false_positives": 5,
+      "false_negatives": 1821,
+      "roc_auc": 0.8636
+    },
+    "range_rule": {
+      "precision": 1.0,
+      "recall": 0.25,
+      "true_positives": 500,
+      "false_positives": 0,
+      "false_negatives": 1500
+    }
+  },
+  "joint_anomalies_only": {
+    "model": {
+      "precision": 0.9038,
+      "recall": 0.0313,
+      "true_positives": 47,
+      "false_positives": 5,
+      "false_negatives": 1453,
+      "roc_auc": 0.8377
+    },
+    "range_rule": {
+      "precision": null,
+      "recall": 0.0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 1500
+    }
+  },
+  "landed_stream": {
+    "panels": 2958,
+    "model_flag_rate": 0.0578,
+    "range_rule_flag_rate": 0.1788,
+    "both": 169,
+    "model_only": 2,
+    "range_rule_only": 360,
+    "neither": 2427,
+    "vital_correlation": [
+      [
+        1.0,
+        -0.002,
+        -0.016,
+        0.01,
+        0.012,
+        -0.023
+      ],
+      [
+        -0.002,
+        1.0,
+        -0.023,
+        0.009,
+        -0.012,
+        -0.023
+      ],
+      [
+        -0.016,
+        -0.023,
+        1.0,
+        0.026,
+        -0.005,
+        0.005
+      ],
+      [
+        0.01,
+        0.009,
+        0.026,
+        1.0,
+        -0.011,
+        -0.03
+      ],
+      [
+        0.012,
+        -0.012,
+        -0.005,
+        -0.011,
+        1.0,
+        -0.005
+      ],
+      [
+        -0.023,
+        -0.023,
+        0.005,
+        -0.03,
+        -0.005,
+        1.0
+      ]
+    ],
+    "features": [
+      "heart_rate",
+      "spo2",
+      "resp_rate",
+      "temp_c",
+      "sbp",
+      "dbp"
+    ]
+  }
+}

@@ -1,5 +1,16 @@
-"""DE-mode tool: score a single multi-vital reading for JOINT anomaly risk.
+"""DE-mode tool: check a single multi-vital reading - rules first, model second.
 
+Rules decide. The model only adds. Evaluated on 2026-10-14
+(ml/evaluate_anomaly_model.py, docs/eda/), the committed model flagged 26% of
+panels with one vital outside its alert band (the range rule: 100%) and 1-7%
+of in-band joint patterns. Its training data has no correlation between
+vitals to learn from (docs/eda/README.md). So `is_anomaly` is true when any
+rule fires OR the model flags the reading. The rules are: a vital outside
+VITAL_RANGES, a physically impossible value (PHYSIOLOGIC_LIMITS), and
+diastolic at or above systolic. `decided_by` says which fired, and the model
+is reported as advisory until a retrained one beats the rules.
+
+Original rationale, kept for the retrained model:
 `common.contracts.VITAL_RANGES` (used by `simulator/domain.py` and the
 Silver-layer DLT expectations) is a per-column range check: it can only ever
 flag one out-of-band value at a time. This tool instead scores the six vitals
@@ -23,7 +34,7 @@ import numpy as np
 import onnxruntime as ort
 
 from agent.llm import ToolResult
-from common.contracts import VITAL_ITEM_TYPES
+from common.contracts import PHYSIOLOGIC_LIMITS, VITAL_ITEM_TYPES, VITAL_RANGES
 
 # Deliberately duplicated (not imported) from ml/train_anomaly_model.py:
 # that module pulls in mlflow/scikit-learn/skl2onnx for TRAINING, multi-
@@ -45,6 +56,31 @@ def _load_session(model_path: str) -> ort.InferenceSession:
     same process; production only ever exercises one path.
     """
     return ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+
+
+MODEL_STATUS = (
+    "advisory - in evaluation (docs/eda/model_eval.json) it caught 26% of panels with one vital out of band "
+    "and 1-7% of in-band joint patterns; the rules decide"
+)
+
+
+def rule_findings(vitals: dict) -> list[str]:
+    """Deterministic checks a person can verify by eye."""
+    findings = []
+    for name in FEATURE_ORDER:
+        value = float(vitals[name])
+        plo, phi = PHYSIOLOGIC_LIMITS[name]
+        lo, hi = VITAL_RANGES[name]
+        if not plo <= value <= phi:
+            findings.append(f"{name}={value:g} is physically impossible (possible: {plo}-{phi})")
+        elif not lo <= value <= hi:
+            side = "below" if value < lo else "above"
+            findings.append(f"{name}={value:g} is {side} the alert band {lo}-{hi}")
+    if float(vitals["dbp"]) >= float(vitals["sbp"]):
+        findings.append(
+            f"dbp={float(vitals['dbp']):g} is not below sbp={float(vitals['sbp']):g} (impossible pair)"
+        )
+    return findings
 
 
 def score_vitals_anomaly(vitals: dict, *, model_path: Path | str | None = None) -> ToolResult:
@@ -96,10 +132,17 @@ def score_vitals_anomaly(vitals: dict, *, model_path: Path | str | None = None) 
     # function-shaped anomaly score; lower/more negative = more anomalous).
     label = int(outputs[0][0][0])
     score = float(outputs[1][0][0])
+    findings = rule_findings(vitals)
+    model_flag = label == -1
+    decided_by = "+".join(name for name, fired in (("rules", findings), ("model", model_flag)) if fired) or "none"
 
     payload = {
         "ok": True,
-        "is_anomaly": label == -1,
+        "is_anomaly": bool(findings) or model_flag,
+        "decided_by": decided_by,
+        "rule_findings": findings,
+        "model_is_anomaly": model_flag,
+        "model_status": MODEL_STATUS,
         "label": label,
         "score": score,
         "features": FEATURE_ORDER,
