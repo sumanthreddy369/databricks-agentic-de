@@ -20,6 +20,8 @@ services:
   console:
     image: redpandadata/console:v2.7.2
     container_name: redpanda-console
+    # Exits if the broker isn't up yet; retry instead of staying down.
+    restart: on-failure
     depends_on:
       - redpanda
     environment:

@@ -24,9 +24,13 @@ Every number below is in `eda_summary.json` or `model_eval.json`.
 - **So the anomaly model can't work, and it doesn't.** It catches 26% of
   panels with one vital out of band (the existing range rule catches 100%),
   and 1-7% of the joint patterns it was built for.
-- **Done about it:** the agent's anomaly tool now lets deterministic rules
-  decide. The model is advisory until it is retrained on realistic data and
-  beats them.
+- **Round 1 fix:** the agent's anomaly tool let deterministic rules decide
+  and made the model advisory.
+- **Round 2:** the simulator now has physiology (`simulator/physiology.py`).
+  Retrained on it, model v2 catches 61% of deteriorating patients at
+  NEWS2's false-alarm rate (NEWS2: 47%), including hypertensive crisis,
+  which NEWS2 can't see. It is now a calibrated third layer after the rules
+  and NEWS2. Validated on simulated physiology only.
 
 ## The data
 
@@ -134,7 +138,7 @@ corners of the band rank higher). At its operating threshold, though, it
 almost never fires. It can't be better than that: the training data
 contains no joint structure to learn.
 
-### What changed because of this
+### What changed because of this (round 1)
 
 `agent/tools/anomaly_score.py` now runs deterministic rules on every
 reading: alert band, physically impossible value, and diastolic >= systolic
@@ -144,14 +148,52 @@ true if a rule fires **or** the model flags the reading. `decided_by`,
 agent's tool description tells it never to present the model's flag alone.
 Tests: `tests/test_anomaly_score_tool.py`.
 
-### What would make the model worth having
+## Round 2: realistic patients, NEWS2, and model v2
 
-1. A simulator with physiology: a per-patient baseline, correlated vitals
-   (falling SpO2 with rising heart and respiratory rate), acuity by unit, and
-   labelled deterioration episodes.
-2. Retrain on that, then re-run `ml/evaluate_anomaly_model.py`. Promote the
-   model from advisory only if it beats the rules on the joint patterns
-   without raising false alarms on normal panels.
-3. For a clinical early-warning signal, a published score such as NEWS2 is
-   a stronger baseline than an unsupervised model. It is deterministic and
-   explainable to clinicians.
+Round 1 named three steps. All three are done.
+
+1. **Physiology in the simulator** (`simulator/physiology.py`). Each patient
+   gets a baseline around adult normals, with diastolic tied to systolic.
+   Acuity by unit makes ICU patients sicker. Deterioration episodes
+   (respiratory distress, sepsis, shock, hypertensive crisis) ramp up over
+   simulated minutes and move several vitals together. Rare device artifacts
+   remain. The event contract is unchanged: labels stay out of the stream.
+   Tests: `tests/test_early_warning_and_physiology.py`.
+2. **NEWS2** (`agent/tools/early_warning.py`), the published early-warning
+   score, as the deterministic baseline. Consciousness and supplemental
+   oxygen aren't in the data and score 0.
+3. **Model v2**, retrained on stable patients and compared with the range
+   rule, NEWS2 and model v1 (`ml/evaluate_anomaly_model.py`).
+
+![Detector comparison](detector_comparison.png)
+
+| Simulated patients (500 per set, 3,000 stable) | Range rule | NEWS2 | Model v1 | Model v2 |
+|---|---|---|---|---|
+| Stable: should NOT flag | 1.7% | 1.8% | 0% | 4.8% |
+| Deterioration caught (8 sets) | 30% | 47% | 6.8% | 70% |
+| ROC AUC | 0.64 | 0.82 | 0.61 | 0.90 |
+
+At its default threshold, model v2 raises 2.7 times NEWS2's false alarms,
+so the fair comparison sets its threshold to match NEWS2's 1.8%. At that
+rate it catches **61% vs NEWS2's 47%**. It catches hypertensive crisis
+(70% established), which NEWS2 can't score below a systolic of 220, and
+early sepsis (40% vs 22%). NEWS2 stays slightly ahead on early respiratory
+distress and early shock.
+
+**Decision (automated in the evaluation):** promote model v2 as a third
+layer, at that calibrated threshold, written to
+`ml/models/vitals_anomaly_calibration.json`. `score_vitals_anomaly` now
+reports three layers in `decided_by`: rules, NEWS2, model. Together they
+catch **66%** of deteriorating panels with **3.8%** false alarms on stable
+patients. The rules still decide what they can see: the model scores SpO2
+80 as normal.
+
+**Limits:**
+
+- Model v2 was trained and tested on the same simulator, so these numbers
+  show it learns the physiology we wrote, not that it would work on real
+  patients.
+- The data on Databricks is still the old uniform stream; NEWS2 fires on
+  70% of it and model v2 on 94%. Regenerating it with the new simulator
+  needs a workspace login.
+- The full tables are in [results.md](../results.md).

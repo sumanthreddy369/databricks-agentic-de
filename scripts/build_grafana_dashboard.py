@@ -198,9 +198,11 @@ def panels() -> list[dict]:
     )
     p.append(
         bars(
-            "Golden set: failures and non-answers",
-            'agentic_de_golden_results{result!~"correct|pass"}',
-            "{{config}} {{result}}",
+            "Golden set: fails + non-answers, by configuration",
+            # Every configuration, zeros included - a lone bar can't show the comparison.
+            'sum by (config) (agentic_de_golden_results{result!~"correct|pass"})'
+            " or 0 * sum by (config) (agentic_de_golden_results)",
+            "{{config}}",
             {"h": 9, "w": 8, "x": 8, "y": 23},
         )
     )
@@ -215,13 +217,36 @@ def panels() -> list[dict]:
     )
     p.append(
         bars(
-            "Anomaly detection: share of each labelled test set flagged",
-            "agentic_de_anomaly_eval_flag_rate",
-            "{{test_set}} - {{detector}}",
-            {"h": 12, "w": 16, "x": 0, "y": 32},
+            "Deterioration caught (simulated patients)",
+            'agentic_de_anomaly_detector_recall{suite="physiology"}',
+            "{{detector}}",
+            {"h": 6, "w": 8, "x": 0, "y": 32},
             unit="percentunit",
             max_value=1,
-            description="From docs/eda/model_eval.json. 'normal' should be 0; every other set should be 1.",
+            description="Share of deteriorating panels (4 episode types, early and established) each detector "
+            "flagged. From docs/eda/model_eval.json.",
+        )
+    )
+    p.append(
+        bars(
+            "False alarms on stable patients",
+            'agentic_de_anomaly_detector_false_alarm_rate{suite="physiology"}',
+            "{{detector}}",
+            {"h": 6, "w": 8, "x": 8, "y": 32},
+            unit="percentunit",
+            max_value=0.1,
+        )
+    )
+    p.append(
+        bars(
+            "Caught at the same false-alarm rate as NEWS2",
+            "agentic_de_anomaly_recall_at_matched_false_alarms",
+            "{{detector}}",
+            {"h": 6, "w": 16, "x": 0, "y": 38},
+            unit="percentunit",
+            max_value=1,
+            description="Model threshold set to raise as many false alarms as NEWS2; the fair comparison "
+            "behind promoting it to a calibrated extra signal.",
         )
     )
     p.append(
@@ -243,7 +268,7 @@ def panels() -> list[dict]:
             "options": {
                 "mode": "markdown",
                 "content": "Every request is a trace (`agent.request`) with one span per tool call "
-                "(`agent.tool`, attribute `tool.outcome`).\n\nOpen **Explore → Jaeger**, service "
+                "(`agent.tool <name>`, attribute `tool.outcome`).\n\nOpen **Explore → Jaeger**, service "
                 "`databricks-agentic-de`, or Jaeger at http://localhost:16686.",
             },
         }

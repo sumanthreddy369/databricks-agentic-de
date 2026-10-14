@@ -69,7 +69,17 @@ GOLDEN = {
         "genie_latency_s": {"p50": 13.4, "p90": 17.1, "max": 22.1},
     },
 }
-MODEL_EVAL = {"test_sets": {"normal": {"model_flag_rate": 0.0025, "range_rule_flag_rate": 0.0}}}
+MODEL_EVAL = {
+    "suites": {
+        "physiology": {
+            "sets": {
+                "stable": {"n": 3000, "should_flag": False, "flag_rate": {"news2": 0.018, "model_v2": 0.048}}
+            },
+            "summary": {"news2": {"recall": 0.474, "false_positive_rate": 0.018}},
+        }
+    },
+    "decision": {"recall_at_matched_false_alarms": {"news2": 0.474, "model_v2": 0.607}},
+}
 
 
 def _metrics(rows):
@@ -97,7 +107,13 @@ def test_snapshot_is_computed_from_the_records():
     assert m[("agentic_de_golden_run_age_hours", ())] == round(
         (NOW - datetime(2026, 10, 14, 2, 12, 29, tzinfo=UTC)).total_seconds() / 3600, 2
     )
-    assert m[("agentic_de_anomaly_eval_flag_rate", (("detector", "model"), ("test_set", "normal")))] == 0.0025
+    flag = (
+        "agentic_de_anomaly_eval_flag_rate",
+        (("detector", "model_v2"), ("suite", "physiology"), ("test_set", "stable")),
+    )
+    assert m[flag] == 0.048
+    assert m[("agentic_de_anomaly_detector_recall", (("detector", "news2"), ("suite", "physiology")))] == 0.474
+    assert m[("agentic_de_anomaly_recall_at_matched_false_alarms", (("detector", "model_v2"),))] == 0.607
 
 
 def test_every_snapshot_metric_is_declared():
@@ -195,7 +211,7 @@ def test_request_and_tool_spans_carry_outcomes_but_never_request_text(tmp_path):
     agent.handle(question, mode="da")
 
     spans = {s.name: s for s in exporter.get_finished_spans()}
-    request, tool = spans["agent.request"], spans["agent.tool"]
+    request, tool = spans["agent.request"], spans["agent.tool ask_genie"]
     assert tool.parent.span_id == request.context.span_id
     assert tool.attributes["tool.name"] == "ask_genie"
     assert tool.attributes["tool.outcome"] == "refused"

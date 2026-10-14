@@ -1,137 +1,280 @@
 {
-  "model": "ml/models/vitals_anomaly.onnx",
+  "detectors": [
+    "range_rule",
+    "news2",
+    "model_v1",
+    "model_v2"
+  ],
   "seed": 20261014,
-  "test_sets": {
-    "normal": {
-      "n": 2000,
-      "should_flag": false,
-      "model_flag_rate": 0.0025,
-      "range_rule_flag_rate": 0.0
+  "suites": {
+    "uniform": {
+      "sets": {
+        "normal": {
+          "n": 2000,
+          "should_flag": false,
+          "flag_rate": {
+            "range_rule": 0.0,
+            "news2": 0.69,
+            "model_v1": 0.0025,
+            "model_v2": 0.942
+          }
+        },
+        "one_vital_out_of_band": {
+          "n": 500,
+          "should_flag": true,
+          "flag_rate": {
+            "range_rule": 1.0,
+            "news2": 0.822,
+            "model_v1": 0.264,
+            "model_v2": 0.984
+          }
+        },
+        "diastolic_at_or_above_systolic": {
+          "n": 500,
+          "should_flag": true,
+          "flag_rate": {
+            "range_rule": 0.0,
+            "news2": 0.862,
+            "model_v1": 0.01,
+            "model_v2": 0.992
+          }
+        },
+        "respiratory_distress_pattern": {
+          "n": 500,
+          "should_flag": true,
+          "flag_rate": {
+            "range_rule": 0.0,
+            "news2": 1.0,
+            "model_v1": 0.018,
+            "model_v2": 1.0
+          }
+        },
+        "shock_pattern": {
+          "n": 500,
+          "should_flag": true,
+          "flag_rate": {
+            "range_rule": 0.0,
+            "news2": 0.992,
+            "model_v1": 0.066,
+            "model_v2": 1.0
+          }
+        }
+      },
+      "summary": {
+        "range_rule": {
+          "recall": 0.25,
+          "false_positive_rate": 0.0,
+          "precision": 1.0,
+          "roc_auc": 0.625
+        },
+        "news2": {
+          "recall": 0.919,
+          "false_positive_rate": 0.69,
+          "precision": 0.5712,
+          "roc_auc": 0.7866
+        },
+        "model_v1": {
+          "recall": 0.0895,
+          "false_positive_rate": 0.0025,
+          "precision": 0.9728,
+          "roc_auc": 0.8636
+        },
+        "model_v2": {
+          "recall": 0.994,
+          "false_positive_rate": 0.942,
+          "precision": 0.5134,
+          "roc_auc": 0.7534
+        }
+      }
     },
-    "one_vital_out_of_band": {
-      "n": 500,
-      "should_flag": true,
-      "model_flag_rate": 0.264,
-      "range_rule_flag_rate": 1.0
-    },
-    "diastolic_at_or_above_systolic": {
-      "n": 500,
-      "should_flag": true,
-      "model_flag_rate": 0.01,
-      "range_rule_flag_rate": 0.0
-    },
-    "respiratory_distress_pattern": {
-      "n": 500,
-      "should_flag": true,
-      "model_flag_rate": 0.018,
-      "range_rule_flag_rate": 0.0
-    },
-    "shock_pattern": {
-      "n": 500,
-      "should_flag": true,
-      "model_flag_rate": 0.066,
-      "range_rule_flag_rate": 0.0
+    "physiology": {
+      "sets": {
+        "stable": {
+          "n": 3000,
+          "should_flag": false,
+          "flag_rate": {
+            "range_rule": 0.0173,
+            "news2": 0.018,
+            "model_v1": 0.0,
+            "model_v2": 0.0483
+          }
+        },
+        "hypertensive_crisis_early": {
+          "n": 500,
+          "should_flag": true,
+          "flag_rate": {
+            "range_rule": 0.13,
+            "news2": 0.0,
+            "model_v1": 0.008,
+            "model_v2": 0.272
+          }
+        },
+        "hypertensive_crisis_established": {
+          "n": 500,
+          "should_flag": true,
+          "flag_rate": {
+            "range_rule": 0.712,
+            "news2": 0.0,
+            "model_v1": 0.302,
+            "model_v2": 0.82
+          }
+        },
+        "respiratory_distress_early": {
+          "n": 500,
+          "should_flag": true,
+          "flag_rate": {
+            "range_rule": 0.02,
+            "news2": 0.47,
+            "model_v1": 0.0,
+            "model_v2": 0.64
+          }
+        },
+        "respiratory_distress_established": {
+          "n": 500,
+          "should_flag": true,
+          "flag_rate": {
+            "range_rule": 0.566,
+            "news2": 0.996,
+            "model_v1": 0.024,
+            "model_v2": 0.998
+          }
+        },
+        "sepsis_early": {
+          "n": 500,
+          "should_flag": true,
+          "flag_rate": {
+            "range_rule": 0.042,
+            "news2": 0.222,
+            "model_v1": 0.002,
+            "model_v2": 0.544
+          }
+        },
+        "sepsis_established": {
+          "n": 500,
+          "should_flag": true,
+          "flag_rate": {
+            "range_rule": 0.248,
+            "news2": 0.912,
+            "model_v1": 0.044,
+            "model_v2": 0.998
+          }
+        },
+        "shock_early": {
+          "n": 500,
+          "should_flag": true,
+          "flag_rate": {
+            "range_rule": 0.116,
+            "news2": 0.278,
+            "model_v1": 0.006,
+            "model_v2": 0.382
+          }
+        },
+        "shock_established": {
+          "n": 500,
+          "should_flag": true,
+          "flag_rate": {
+            "range_rule": 0.598,
+            "news2": 0.914,
+            "model_v1": 0.16,
+            "model_v2": 0.95
+          }
+        }
+      },
+      "summary": {
+        "range_rule": {
+          "recall": 0.304,
+          "false_positive_rate": 0.0173,
+          "precision": 0.959,
+          "roc_auc": 0.6445
+        },
+        "news2": {
+          "recall": 0.474,
+          "false_positive_rate": 0.018,
+          "precision": 0.9723,
+          "roc_auc": 0.8205
+        },
+        "model_v1": {
+          "recall": 0.0683,
+          "false_positive_rate": 0.0,
+          "precision": 1.0,
+          "roc_auc": 0.6116
+        },
+        "model_v2": {
+          "recall": 0.7005,
+          "false_positive_rate": 0.0483,
+          "precision": 0.9508,
+          "roc_auc": 0.9021
+        }
+      }
     }
   },
-  "overall": {
-    "model": {
-      "precision": 0.9728,
-      "recall": 0.0895,
-      "true_positives": 179,
-      "false_positives": 5,
-      "false_negatives": 1821,
-      "roc_auc": 0.8636
-    },
-    "range_rule": {
-      "precision": 1.0,
-      "recall": 0.25,
-      "true_positives": 500,
-      "false_positives": 0,
-      "false_negatives": 1500
+  "matched_false_alarms": {
+    "reference": "news2",
+    "stable_false_positive_rate": 0.018,
+    "models": {
+      "model_v1": {
+        "score_threshold": -0.066962,
+        "recall_by_set": {
+          "hypertensive_crisis_early": 0.132,
+          "hypertensive_crisis_established": 0.706,
+          "respiratory_distress_early": 0.016,
+          "respiratory_distress_established": 0.488,
+          "sepsis_early": 0.014,
+          "sepsis_established": 0.258,
+          "shock_early": 0.09,
+          "shock_established": 0.578
+        },
+        "recall": 0.2853
+      },
+      "model_v2": {
+        "score_threshold": 0.025151,
+        "recall_by_set": {
+          "hypertensive_crisis_early": 0.184,
+          "hypertensive_crisis_established": 0.702,
+          "respiratory_distress_early": 0.45,
+          "respiratory_distress_established": 0.988,
+          "sepsis_early": 0.396,
+          "sepsis_established": 0.99,
+          "shock_early": 0.248,
+          "shock_established": 0.898
+        },
+        "recall": 0.607
+      }
     }
   },
-  "joint_anomalies_only": {
-    "model": {
-      "precision": 0.9038,
-      "recall": 0.0313,
-      "true_positives": 47,
-      "false_positives": 5,
-      "false_negatives": 1453,
-      "roc_auc": 0.8377
+  "decision": {
+    "use": "rules + NEWS2 + model_v2 (calibrated)",
+    "model": "model_v2",
+    "promoted": true,
+    "recall_at_matched_false_alarms": {
+      "news2": 0.474,
+      "model_v2": 0.607
     },
-    "range_rule": {
-      "precision": null,
-      "recall": 0.0,
-      "true_positives": 0,
-      "false_positives": 0,
-      "false_negatives": 1500
-    }
+    "score_threshold": 0.025151,
+    "caveat": "Trained and tested on simulated physiology only; not validated on real patients."
+  },
+  "layered": {
+    "flag_rate": {
+      "stable": 0.0383,
+      "hypertensive_crisis_early": 0.212,
+      "hypertensive_crisis_established": 0.786,
+      "respiratory_distress_early": 0.576,
+      "respiratory_distress_established": 1.0,
+      "sepsis_early": 0.434,
+      "sepsis_established": 0.992,
+      "shock_early": 0.34,
+      "shock_established": 0.94
+    },
+    "recall": 0.66,
+    "stable_false_positive_rate": 0.0383
   },
   "landed_stream": {
     "panels": 2958,
-    "model_flag_rate": 0.0578,
-    "range_rule_flag_rate": 0.1788,
-    "both": 169,
-    "model_only": 2,
-    "range_rule_only": 360,
-    "neither": 2427,
-    "vital_correlation": [
-      [
-        1.0,
-        -0.002,
-        -0.016,
-        0.01,
-        0.012,
-        -0.023
-      ],
-      [
-        -0.002,
-        1.0,
-        -0.023,
-        0.009,
-        -0.012,
-        -0.023
-      ],
-      [
-        -0.016,
-        -0.023,
-        1.0,
-        0.026,
-        -0.005,
-        0.005
-      ],
-      [
-        0.01,
-        0.009,
-        0.026,
-        1.0,
-        -0.011,
-        -0.03
-      ],
-      [
-        0.012,
-        -0.012,
-        -0.005,
-        -0.011,
-        1.0,
-        -0.005
-      ],
-      [
-        -0.023,
-        -0.023,
-        0.005,
-        -0.03,
-        -0.005,
-        1.0
-      ]
-    ],
-    "features": [
-      "heart_rate",
-      "spo2",
-      "resp_rate",
-      "temp_c",
-      "sbp",
-      "dbp"
-    ]
+    "flag_rate": {
+      "range_rule": 0.1788,
+      "news2": 0.6971,
+      "model_v1": 0.0578,
+      "model_v2": 0.9412
+    }
   }
 }

@@ -27,6 +27,7 @@ from simulator.domain import (
     generate_transfer_event,
     generate_vitals_event,
 )
+from simulator.physiology import Physiology
 
 # Vitals cadence jitter, in seconds, applied every time a vital type is
 # rescheduled after firing.
@@ -43,6 +44,9 @@ class ActiveEncounter:
     patient: PatientSnapshot
     encounter: EncounterInfo
     next_vital_due: dict[str, datetime] = field(default_factory=dict)
+    # Per-patient physiology: readings move together and with the patient's state.
+    physiology: Physiology | None = None
+    last_step: datetime | None = None
 
 
 def _jittered_next_due(now: datetime) -> datetime:
@@ -66,6 +70,8 @@ class Population:
                 patient=patient,
                 encounter=event.encounter,
                 next_vital_due={item: _jittered_next_due(now) for item in VITAL_ITEM_TYPES},
+                physiology=Physiology.new(event.encounter.unit, self._rng),
+                last_step=now,
             )
         return events
 
@@ -74,9 +80,13 @@ class Population:
         discharged_encounter_ids = []
 
         for encounter_id, active in list(self.active.items()):
+            if active.physiology is not None and active.last_step is not None:
+                active.physiology.step((now - active.last_step).total_seconds() / 60, self._rng)
+                active.last_step = now
             for itemid, due_at in list(active.next_vital_due.items()):
                 if due_at <= now:
-                    events.append(generate_vitals_event(active.patient.patient_id, encounter_id, itemid))
+                    value = active.physiology.reading(itemid, self._rng) if active.physiology else None
+                    events.append(generate_vitals_event(active.patient.patient_id, encounter_id, itemid, value))
                     active.next_vital_due[itemid] = _jittered_next_due(now)
 
             if self._rng.random() < DISCHARGE_PROBABILITY_PER_TICK:
@@ -91,6 +101,8 @@ class Population:
                     generate_transfer_event(active.patient.patient_id, encounter_id, from_unit, to_unit)
                 )
                 active.encounter.unit = to_unit
+                if active.physiology is not None:
+                    active.physiology.set_unit(to_unit)
 
         for encounter_id in discharged_encounter_ids:
             del self.active[encounter_id]

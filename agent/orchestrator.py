@@ -130,10 +130,11 @@ DE_TOOLS = [
     {
         "name": "score_vitals_anomaly",
         "description": (
-            "Check one multi-vital reading (heart_rate, spo2, resp_rate, temp_c, sbp, dbp). Deterministic "
-            "rules decide (alert bands, physically impossible values, diastolic >= systolic) and are listed "
-            "in rule_findings; a local ONNX IsolationForest adds an advisory flag. Report which one fired "
-            "(decided_by) and never present the model's flag alone as the verdict."
+            "Check one multi-vital reading (heart_rate, spo2, resp_rate, temp_c, sbp, dbp) with three "
+            "layers: deterministic rules (rule_findings), the NEWS2 early-warning score (news2), and an "
+            "anomaly model at an evaluated threshold (model_status says whether it is calibrated). Report "
+            "which layers fired (decided_by), the NEWS2 risk, and that the model is validated on simulated "
+            "data only."
         ),
         "input_schema": {
             "type": "object",
@@ -431,7 +432,8 @@ class OrchestratorAgent:
             return "da"
 
     def _dispatch(self, tool_name: str, tool_input: dict) -> ToolResult:
-        with otel.get_tracer().start_as_current_span("agent.tool") as span:
+        # Named per tool (a small, fixed set) so a trace view reads as the steps taken.
+        with otel.get_tracer().start_as_current_span(f"agent.tool {tool_name}") as span:
             result = self._dispatch_guarded(tool_name, tool_input)
             span.set_attribute("tool.name", tool_name)
             span.set_attribute("tool.outcome", otel.tool_outcome(result.content, result.is_error))

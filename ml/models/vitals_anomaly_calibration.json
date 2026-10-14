@@ -1,0 +1,12 @@
+{
+  "promoted": true,
+  "score_threshold": 0.025151,
+  "matched_to": "NEWS2 false-alarm rate on stable simulated patients",
+  "stable_false_positive_rate": 0.018,
+  "recall_at_matched_false_alarms": {
+    "news2": 0.474,
+    "model_v2": 0.607
+  },
+  "caveat": "Trained and tested on simulated physiology only; not validated on real patients.",
+  "seed": 20261014
+}

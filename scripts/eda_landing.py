@@ -225,14 +225,15 @@ def model_vs_rule() -> None:
         "respiratory_distress_pattern": "Respiratory-distress pattern",
         "shock_pattern": "Shock pattern",
     }
-    sets = report["test_sets"]
+    # The first evaluation: model v1 (uniform training data) vs the range rule.
+    sets = report["suites"]["uniform"]["sets"]
     labels = [names[k] for k in sets]
-    model = [sets[k]["model_flag_rate"] * 100 for k in sets]
-    rule = [sets[k]["range_rule_flag_rate"] * 100 for k in sets]
+    model = [sets[k]["flag_rate"]["model_v1"] * 100 for k in sets]
+    rule = [sets[k]["flag_rate"]["range_rule"] * 100 for k in sets]
     fig, ax = plt.subplots(figsize=(9, 3.8))
     y = list(range(len(labels)))[::-1]
     h = 0.36
-    ax.barh([v + h / 2 for v in y], model, height=h, color=SERIES_1, label="Anomaly model (ONNX)")
+    ax.barh([v + h / 2 for v in y], model, height=h, color=SERIES_1, label="Anomaly model v1 (ONNX)")
     ax.barh([v - h / 2 for v in y], rule, height=h, color=SERIES_2, label="Range rule (Silver already has it)")
     for yi, m, r in zip(y, model, rule, strict=True):
         ax.text(
@@ -248,7 +249,7 @@ def model_vs_rule() -> None:
         ax.spines[side].set_visible(False)
     ax.legend(loc="lower right", frameon=False, bbox_to_anchor=(1, 1.0), ncol=2)
     fig.suptitle(
-        "The anomaly model misses what it was built to catch",
+        "Model v1 misses what it was built to catch",
         x=0.01,
         ha="left",
         fontsize=12,
@@ -257,6 +258,76 @@ def model_vs_rule() -> None:
     )
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     fig.savefig(OUT / "model_vs_range_rule.png", dpi=160)
+    plt.close(fig)
+
+
+SERIES_3 = "#1baf7a"  # categorical slot 3 (aqua); slots 1-3 validate all-pairs
+
+
+def detector_comparison() -> None:
+    """Simulated patients (simulator/physiology.py): range rule, NEWS2 and
+    model v2, per episode, plus false alarms on stable patients."""
+    path = OUT / "model_eval.json"
+    if not path.exists():
+        return
+    report = json.loads(path.read_text(encoding="utf-8"))
+    sets = report["suites"]["physiology"]["sets"]
+    detectors = [
+        ("range_rule", "Range rule", SERIES_2),
+        ("news2", "NEWS2", SERIES_3),
+        ("model_v2", "Model v2 (calibrated)", SERIES_1),
+    ]
+    order = ["stable"] + [k for k in sets if k != "stable"]
+    labels = [
+        "Stable (should NOT flag)"
+        if k == "stable"
+        else k.replace("_", " ").replace(" early", ", early").replace(" established", ", established").capitalize()
+        for k in order
+    ]
+    fig, ax = plt.subplots(figsize=(10, 6.2))
+    y = list(range(len(order)))[::-1]
+    h = 0.26
+    for i, (key, name, color) in enumerate(detectors):
+        if key == "model_v2":
+            # At the calibrated threshold the agent uses, not the model's default label.
+            matched = report["matched_false_alarms"]
+            calibrated = matched["models"]["model_v2"]["recall_by_set"]
+            calibrated["stable"] = matched["stable_false_positive_rate"]
+            values = [calibrated[k] * 100 for k in order]
+        else:
+            values = [sets[k]["flag_rate"][key] * 100 for k in order]
+        offset = (1 - i) * h
+        ax.barh([v + offset for v in y], values, height=h, color=color, label=name)
+        for yi, v in zip(y, values, strict=True):
+            ax.text(v + 0.8, yi + offset, f"{v:.0f}%", va="center", fontsize=7.5, color=INK_2)
+    ax.set_yticks(y, labels, color=INK)
+    ax.set_xlim(0, 112)
+    ax.set_xlabel("share of panels flagged")
+    ax.grid(axis="x", color=GRID)
+    ax.set_axisbelow(True)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    ax.legend(loc="lower right", frameon=False, bbox_to_anchor=(1, 1.0), ncol=3)
+    matched = report["decision"]["recall_at_matched_false_alarms"]
+    fig.suptitle(
+        "Realistic patients: model v2 catches most, at a calibrated threshold",
+        x=0.01,
+        ha="left",
+        fontsize=12,
+        color=INK,
+        fontweight="bold",
+    )
+    fig.text(
+        0.01,
+        0.935,
+        f"At NEWS2's false-alarm rate on stable patients, model v2 catches {matched['model_v2']:.0%} "
+        f"of deteriorating "
+        f"panels vs NEWS2 {matched['news2']:.0%}. Simulated physiology only.",
+        fontsize=9.5,
+        color=INK_2,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.savefig(OUT / "detector_comparison.png", dpi=160)
     plt.close(fig)
 
 
@@ -273,6 +344,7 @@ def main() -> int:
     (OUT / "eda_summary.json").write_text(json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8")
     vital_histograms(con)
     model_vs_rule()
+    detector_comparison()
     print(json.dumps(summary, indent=1, default=str))
     return 0
 

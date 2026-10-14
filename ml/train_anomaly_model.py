@@ -10,11 +10,13 @@ so it can flag a reading where every individual value is in-range but the
 a high respiratory rate at the same time) — something no single-column range
 check can ever catch.
 
-Training data is produced by calling `simulator/domain.py`'s own
-`generate_vitals_event` once per vital type per synthetic "reading" (the same
-generator the rest of this repo uses for the Kafka stream), not a separately
-invented data source — see that module's docstring for the dataset-sourcing
-rationale this project follows throughout.
+Training data: panels from STABLE simulated patients
+(`simulator/physiology.py`, the same physiology that drives the event
+stream), across all units. The model learns what a stable person's vitals
+look like together and flags departures from it. Version 1 trained on the
+original uniform, independent generator and could not learn anything joint
+(docs/eda/); it is kept as ml/models/vitals_anomaly_v1_uniform.onnx for the
+comparison in ml/evaluate_anomaly_model.py.
 
 Runnable via:
 
@@ -55,7 +57,7 @@ from skl2onnx.common.data_types import FloatTensorType  # noqa: E402
 from sklearn.ensemble import IsolationForest  # noqa: E402
 
 from common.contracts import VITAL_ITEM_TYPES  # noqa: E402
-from simulator.domain import generate_vitals_event  # noqa: E402
+from simulator.physiology import UNIT_ACUITY, Physiology  # noqa: E402
 
 # Fixed column order used both when building the training matrix here and
 # when agent/tools/anomaly_score.py builds a single-row inference input —
@@ -77,27 +79,20 @@ DEFAULT_CONTAMINATION = 0.05
 # average over (this is a synthetic 6-feature panel, not a high-dimensional
 # problem that would need many more).
 DEFAULT_N_ESTIMATORS = 100
-_SYNTHETIC_PATIENT_ID = "synthetic-training-patient"
-_SYNTHETIC_ENCOUNTER_ID = "synthetic-training-encounter"
 
 
 def _generate_feature_matrix(n_rows: int, *, seed: int) -> np.ndarray:
-    """Builds an (n_rows, len(FEATURE_ORDER)) float32 matrix by calling
-    `simulator.domain.generate_vitals_event` once per feature per row — the
-    same generator (including its `OUT_OF_RANGE_PROBABILITY` tail) that
-    produces the live Kafka stream, just called directly rather than
-    replayed from a broker.
+    """Builds an (n_rows, len(FEATURE_ORDER)) float32 matrix of panels from
+    stable simulated patients, one new patient per row, units drawn evenly.
     """
     rng_state = random.getstate()
     random.seed(seed)
+    units = sorted(UNIT_ACUITY)
     try:
         rows = []
         for _ in range(n_rows):
-            row = [
-                generate_vitals_event(_SYNTHETIC_PATIENT_ID, _SYNTHETIC_ENCOUNTER_ID, itemid).vital.value
-                for itemid in FEATURE_ORDER
-            ]
-            rows.append(row)
+            panel = Physiology.new(random.choice(units)).panel()
+            rows.append([panel[itemid] for itemid in FEATURE_ORDER])
     finally:
         random.setstate(rng_state)
     return np.array(rows, dtype=np.float32)

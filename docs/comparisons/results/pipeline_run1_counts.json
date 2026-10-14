@@ -1,0 +1,21 @@
+{
+  "measured_at": "2026-10-14",
+  "where": "GCP trial workspace, dev target, serverless, triggered run",
+  "source": "Statement Execution API counts on healthcare_agentic_de after the first successful pipeline run",
+  "rows": {
+    "raw events (landing files)": 103301,
+    "bronze_patient_events": 103301,
+    "silver vitals": 99213,
+    "gold fct_vitals": 99213,
+    "gold fct_encounter_history (SCD2)": 3765,
+    "gold fct_encounters": 1401,
+    "gold dim_patients": 1388,
+    "gold dim_providers": 30,
+    "gold_live_vitals_by_unit windows": 5
+  },
+  "checks": {
+    "encounters discharged / open": "1,201 / 200",
+    "heart-rate readings in live windows": 16547,
+    "names and MRNs masked in dim_patients": "1,388 of 1,388"
+  }
+}

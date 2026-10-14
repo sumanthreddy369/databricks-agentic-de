@@ -1,16 +1,22 @@
-"""DE-mode tool: check a single multi-vital reading - rules first, model second.
+"""DE-mode tool: check a single multi-vital reading with three layers, each
+reported separately in `decided_by`:
 
-Rules decide. The model only adds. Evaluated on 2026-10-14
-(ml/evaluate_anomaly_model.py, docs/eda/), the committed model flagged 26% of
-panels with one vital outside its alert band (the range rule: 100%) and 1-7%
-of in-band joint patterns. Its training data has no correlation between
-vitals to learn from (docs/eda/README.md). So `is_anomaly` is true when any
-rule fires OR the model flags the reading. The rules are: a vital outside
-VITAL_RANGES, a physically impossible value (PHYSIOLOGIC_LIMITS), and
-diastolic at or above systolic. `decided_by` says which fired, and the model
-is reported as advisory until a retrained one beats the rules.
+1. rules a person can check by eye: a vital outside VITAL_RANGES, a
+   physically impossible value (PHYSIOLOGIC_LIMITS), diastolic >= systolic;
+2. NEWS2, the published early-warning score (agent/tools/early_warning.py);
+3. the anomaly model - only at the threshold its evaluation justified.
 
-Original rationale, kept for the retrained model:
+`is_anomaly` is true if any layer fires. History (docs/eda/): model v1,
+trained on uniform independent vitals, caught 26% of single out-of-band
+vitals and 1-7% of joint patterns, so it was demoted to advisory. Model v2,
+trained on stable patients from simulator/physiology.py, catches 61% of
+deterioration at NEWS2's false-alarm rate (NEWS2: 47%), notably hypertensive
+crisis, which NEWS2 can't see. ml/evaluate_anomaly_model.py writes that
+threshold to ml/models/vitals_anomaly_calibration.json; without it, or for a
+model it wasn't computed for, the model's own label is used and reported as
+advisory. Validated on simulated physiology only - never on real patients.
+
+Original rationale for the model:
 `common.contracts.VITAL_RANGES` (used by `simulator/domain.py` and the
 Silver-layer DLT expectations) is a per-column range check: it can only ever
 flag one out-of-band value at a time. This tool instead scores the six vitals
@@ -34,6 +40,7 @@ import numpy as np
 import onnxruntime as ort
 
 from agent.llm import ToolResult
+from agent.tools.early_warning import news2
 from common.contracts import PHYSIOLOGIC_LIMITS, VITAL_ITEM_TYPES, VITAL_RANGES
 
 # Deliberately duplicated (not imported) from ml/train_anomaly_model.py:
@@ -45,6 +52,7 @@ from common.contracts import PHYSIOLOGIC_LIMITS, VITAL_ITEM_TYPES, VITAL_RANGES
 # `tests/test_anomaly_score_tool.py` cross-checks this explicitly.
 FEATURE_ORDER: list[str] = list(VITAL_ITEM_TYPES)
 DEFAULT_ONNX_MODEL_PATH = Path(__file__).resolve().parent.parent.parent / "ml" / "models" / "vitals_anomaly.onnx"
+DEFAULT_CALIBRATION_PATH = DEFAULT_ONNX_MODEL_PATH.with_name("vitals_anomaly_calibration.json")
 
 
 @functools.lru_cache(maxsize=8)
@@ -58,10 +66,17 @@ def _load_session(model_path: str) -> ort.InferenceSession:
     return ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
 
 
-MODEL_STATUS = (
-    "advisory - in evaluation (docs/eda/model_eval.json) it caught 26% of panels with one vital out of band "
-    "and 1-7% of in-band joint patterns; the rules decide"
+ADVISORY_STATUS = (
+    "advisory - no evaluated threshold for this model; its own label is shown, rules and NEWS2 decide"
 )
+
+
+def _calibration(path: Path) -> dict | None:
+    try:
+        calibration = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return calibration if calibration.get("promoted") else None
 
 
 def rule_findings(vitals: dict) -> list[str]:
@@ -83,7 +98,9 @@ def rule_findings(vitals: dict) -> list[str]:
     return findings
 
 
-def score_vitals_anomaly(vitals: dict, *, model_path: Path | str | None = None) -> ToolResult:
+def score_vitals_anomaly(
+    vitals: dict, *, model_path: Path | str | None = None, calibration_path: Path | str | None = None
+) -> ToolResult:
     """Scores one multi-vital reading (a dict keyed by the same vital item
     ids as `common.contracts.VITAL_ITEM_TYPES` — heart_rate, spo2, resp_rate,
     temp_c, sbp, dbp) for joint-anomaly risk.
@@ -133,16 +150,32 @@ def score_vitals_anomaly(vitals: dict, *, model_path: Path | str | None = None) 
     label = int(outputs[0][0][0])
     score = float(outputs[1][0][0])
     findings = rule_findings(vitals)
-    model_flag = label == -1
-    decided_by = "+".join(name for name, fired in (("rules", findings), ("model", model_flag)) if fired) or "none"
+    warning = news2(vitals)
 
+    # The evaluated threshold belongs to the committed model only.
+    if calibration_path is None and model_path is None:
+        calibration_path = DEFAULT_CALIBRATION_PATH
+    calibration = _calibration(Path(calibration_path)) if calibration_path else None
+    if calibration:
+        model_flag = -score > calibration["score_threshold"]
+        model_status = (
+            f"calibrated - threshold matched to NEWS2's false-alarm rate on stable patients "
+            f"({calibration['stable_false_positive_rate']:.1%}); {calibration['caveat']}"
+        )
+    else:
+        model_flag = label == -1
+        model_status = ADVISORY_STATUS
+
+    fired = (("rules", bool(findings)), ("news2", warning["trigger"]), ("model", model_flag))
+    decided_by = "+".join(name for name, hit in fired if hit) or "none"
     payload = {
         "ok": True,
-        "is_anomaly": bool(findings) or model_flag,
+        "is_anomaly": decided_by != "none",
         "decided_by": decided_by,
         "rule_findings": findings,
+        "news2": {k: warning[k] for k in ("score", "risk", "trigger", "single_parameter_3")},
         "model_is_anomaly": model_flag,
-        "model_status": MODEL_STATUS,
+        "model_status": model_status,
         "label": label,
         "score": score,
         "features": FEATURE_ORDER,

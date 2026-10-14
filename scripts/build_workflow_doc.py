@@ -155,7 +155,7 @@ W5 = [26, 62, 70, 75, 34]
 
 STACK = [
     ["Layer", "Technology", "Version", "What it does here", "Repo path", "Status"],
-    ["Language / tooling", "Python, uv, ruff, pytest", "Python >=3.11; ruff 0.16.8; pytest 9.1.1", "uv-only package management, lint, 385 tests with zero network calls", "pyproject.toml, uv.lock, tests/", "Tested locally - passing in CI"],
+    ["Language / tooling", "Python, uv, ruff, pytest", "Python >=3.11; ruff 0.16.8; pytest 9.1.1", "uv-only package management, lint, 427 tests with zero network calls", "pyproject.toml, uv.lock, tests/", "Tested locally - passing in CI"],
     ["Data source", "Patient-event simulator (Synthea / MIMIC-IV-shaped, synthetic)", "-", "Admit / transfer / discharge + 6 vitals; Kafka publisher or JSON-lines files", "simulator/", "Runs - 103,301 events generated and ingested"],
     ["Transport (free trial)", "Autoloader over a Unity Catalog volume", "-", "Reads JSON-lines files; no extra service", "simulator/file_feed.py, pipeline/01_ingest/", "Runs on Databricks"],
     ["Transport (prod)", "Kafka / Redpanda", "confluent-kafka 2.15.1", "Production event stream; local broker via Docker", "docker-compose.yml, simulator/producer.py", "Tested locally - not run on Databricks"],
@@ -170,7 +170,8 @@ STACK = [
     ["Router / LLM", "Anthropic Claude via the Anthropic SDK", "anthropic 1.7.0", "Mode routing and tool loop; no agent framework", "agent/llm.py, agent/orchestrator.py", "Tested locally (scripted model) - real model needs a paid key"],
     ["Tool protocol", "Model Context Protocol (MCP)", "mcp 2.2.0", "DE tools served over stdio", "mcp_server/, agent/mcp_bridge.py", "Tested locally"],
     ["Knowledge", "Problem catalog + lookup_problem", "pyyaml 6.0.3", "104 real-time problems with expected response and autonomy level", "agent/knowledge/problem_catalog.yaml", "Tested locally"],
-    ["ML", "IsolationForest -> MLflow -> ONNX", "scikit-learn 1.9.1, mlflow 3.16.1, onnxruntime 1.30.0", "Vitals anomaly score; rules decide, model adds", "ml/, agent/tools/anomaly_score.py", "Advisory - evaluated: misses most of what the range rule catches"],
+    ["ML", "IsolationForest -> MLflow -> ONNX; NEWS2", "scikit-learn 1.9.1, mlflow 3.16.1, onnxruntime 1.30.0", "Deterioration: rules, NEWS2, then model v2 at a calibrated threshold", "ml/, agent/tools/anomaly_score.py, early_warning.py", "Measured - v2 catches 61% vs NEWS2 47% at the same false alarms (simulated)"],
+    ["Simulator physiology", "Per-patient baselines, unit acuity, deterioration episodes", "-", "Realistic, labelled vitals for training and evaluation", "simulator/physiology.py", "Tested locally - Databricks data predates it"],
     ["Human approval", "Approvals CLI + earned autonomy", "-", "Named approver, 4h expiry; promotion after 10 clean runs, auto-demotion", "agent/approvals.py, agent/autonomy.py", "Tested locally"],
     ["Observability", "OpenTelemetry SDK + Collector, Prometheus, Jaeger, Grafana", "otel-sdk 1.45.0; collector 0.111.0; Prometheus 2.54.1; Jaeger 1.62.0; Grafana 11.2.2", "Request and tool traces; human-work, guardrail and quality metrics; one dashboard", "agent/otel.py, agent/telemetry.py, observability/", "Runs locally (Docker) - on demo traffic"],
     ["LLM tracing / logs", "Langfuse, structlog", "langfuse 4.15.6, structlog 26.1.0", "LLM-call traces; structured logs", "agent/llm.py", "Tested locally (no-op path)"],
@@ -191,7 +192,7 @@ GUARDRAILS = [
     ["Question/SQL consistency", "Genie answering a different question (PICU asked, ICU answered)", "agent/tools/genie.py", "Found by golden run 1; regression test"],
     ["Small-cell suppression", "Counts over fewer than 11 patients, incl. Genie's own text", "aggregate_gold_table (exact), ask_genie (COUNT columns)", "Found by golden run 2; tests/test_genie_gateway.py"],
     ["Prompt-injection scan", "Instructions hidden in free text", "governance_guard.scan_for_injection", "tests/test_prompt_injection_guard.py"],
-    ["Rules before models", "An anomaly model's miss hiding a dangerous reading", "agent/tools/anomaly_score.py", "ml/evaluate_anomaly_model.py; tests/test_anomaly_score_tool.py"],
+    ["Rules, then NEWS2, then a calibrated model", "A model's miss hiding a dangerous reading (v2 scores SpO2 80 as normal)", "agent/tools/anomaly_score.py", "ml/evaluate_anomaly_model.py; tests/test_anomaly_score_tool.py"],
     ["Human approval + earned autonomy", "The agent changing pipelines on its own before it has earned it", "agent/approvals.py, agent/autonomy.py", "tests/test_human_approval.py, test_earned_autonomy.py"],
     ["Kill switch + escalation ceiling", "Remediation loops; fixing past a hard stop", "orchestrator", "tests/test_kill_switch.py, test_escalation_ceiling.py"],
     ["Audit log + traces", "Untraceable actions; spans never carry request text", "orchestrator, agent/otel.py", "tests/test_audit_trail.py, test_telemetry.py"],
@@ -210,12 +211,12 @@ REPO_MAP = [
     ["observability/", "OTel Collector, Prometheus, Grafana provisioning and dashboard"],
     ["scripts/", "eda_landing, demo_traffic, build_* (Genie space, dashboard, images, docs), stop_everything"],
     ["docs/", "plan, architecture, eda/, comparisons/ (Genie results), images/, this document"],
-    ["tests/", "385 tests, one file per concern, zero network calls"],
+    ["tests/", "427 tests, one file per concern, zero network calls"],
 ]
 
 NEXT = [
     ["#", "Step", "Needs", "Outcome"],
-    ["1", "Realistic vitals in the simulator; retrain the anomaly model; compare with rules and NEWS2", "-", "A model that earns its place, or evidence it shouldn't"],
+    ["1", "Regenerate the dataset with the physiology simulator and re-run the pipeline and golden set", "Databricks login", "Databricks data matches the simulator"],
     ["2", "Detect patient identity drift in Silver (same patient_id, new name or birth date)", "A pipeline run", "The EDA defect caught by the pipeline"],
     ["3", "Pipeline health from the Lakeflow event log into the dashboard", "Databricks login", "Live pipeline panels next to the agent metrics"],
     ["4", "Healthcheck job on serverless; live pipeline tools run against the workspace", "Databricks login", "The incident workflow running for real"],
@@ -258,7 +259,7 @@ def story(fx):
                 ["Metrics layer", "Runs - one definition per metric for Genie and compute_metric"],
                 ["Human approval, earned autonomy, human-work report", "Tested locally - no real week of operation yet"],
                 ["Observability (OTel, Prometheus, Jaeger, Grafana)", "Runs locally on demo traffic through the real orchestrator"],
-                ["Data and anomaly model", "Measured - EDA done; model worse than the range rule, so rules decide"],
+                ["Data and deterioration detection", "Measured - EDA done; with realistic physiology, model v2 + NEWS2 + rules catch 66% at 3.8% false alarms (simulated)"],
                 ["Not yet", "Claude with a real model (paid key), healthcheck job on serverless, live pipeline-control tools, Agent Bricks, Terraform"],
             ],
             [120, 147],
@@ -430,7 +431,7 @@ def story(fx):
             ["Golden question set", "python -m evals.golden.run (live), .rescore (offline replay)", "Run 2 with current guard: 21/21 answers, 6/6 probes; Genie alone failed 1 probe", "evals/golden/", "Measured"],
             ["Latency", "Same runs", "Genie p50 13.4 s, p90 17.1 s; metric path 1.3 s", "evals/golden/run.py", "Measured"],
             ["EDA", "scripts/eda_landing.py (DuckDB over raw JSON)", "Input clean; identity drift on readmission; vitals not physiological", "docs/eda/", "Measured"],
-            ["Anomaly model", "python -m ml.evaluate_anomaly_model", "26% of single out-of-band vitals (rule 100%); 1-7% of joint patterns", "ml/evaluate_anomaly_model.py", "Measured - model now advisory"],
+            ["Detectors", "python -m ml.evaluate_anomaly_model", "Round 1: model v1 worse than the range rule. Round 2: v2 61% vs NEWS2 47% at equal false alarms", "ml/evaluate_anomaly_model.py", "Measured - v2 promoted as a calibrated third layer"],
             ["Human work", "python -m agent.human_work", "Counts requests, who needed a person, decision times", "agent/human_work.py", "Tested locally - no real usage yet"],
         ],
     )
@@ -466,7 +467,7 @@ def story(fx):
         [
             ["Change code", "glue or guardrail only"],
             ["ruff check", "lint"],
-            ["pytest", "385 tests, no network,", "no API key"],
+            ["pytest", "427 tests, no network,", "no API key"],
             ["Guardrail tests", "masking, injection, MCP", "when core files change"],
             ["Commit + push", "master"],
             ["GitHub Actions CI", "lint + tests"],

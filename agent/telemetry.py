@@ -56,7 +56,11 @@ METRICS = {
     "agentic_de_golden_results": "Golden-set outcomes of the newest report, by configuration and result",
     "agentic_de_golden_run_age_hours": "Hours since the newest golden-set run",
     "agentic_de_answer_latency_seconds": "Golden-set answer latency, by path and statistic",
-    "agentic_de_anomaly_eval_flag_rate": "Share of each labelled test set flagged, by detector",
+    "agentic_de_anomaly_eval_flag_rate": "Share of each labelled test set flagged, by suite and detector",
+    "agentic_de_anomaly_detector_recall": "Share of should-flag panels each detector caught, by suite",
+    "agentic_de_anomaly_detector_false_alarm_rate": "Share of stable panels each detector flagged, by suite",
+    "agentic_de_anomaly_recall_at_matched_false_alarms": "Recall with the model's threshold matched to NEWS2's "
+    "false-alarm rate on stable patients",
 }
 
 
@@ -159,22 +163,18 @@ def snapshot(
         run_at = datetime.strptime(golden["run_at"], "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
         out.append(("agentic_de_golden_run_age_hours", {}, round((now - run_at).total_seconds() / 3600, 2)))
 
-    if model_eval:
-        for test_set, row in model_eval.get("test_sets", {}).items():
-            out.append(
-                (
-                    "agentic_de_anomaly_eval_flag_rate",
-                    {"test_set": test_set, "detector": "model"},
-                    row["model_flag_rate"],
-                )
-            )
-            out.append(
-                (
-                    "agentic_de_anomaly_eval_flag_rate",
-                    {"test_set": test_set, "detector": "range_rule"},
-                    row["range_rule_flag_rate"],
-                )
-            )
+    for suite, body in (model_eval or {}).get("suites", {}).items():
+        for test_set, row in body["sets"].items():
+            for detector, rate in row["flag_rate"].items():
+                labels = {"suite": suite, "test_set": test_set, "detector": detector}
+                out.append(("agentic_de_anomaly_eval_flag_rate", labels, rate))
+        for detector, m in body["summary"].items():
+            labels = {"suite": suite, "detector": detector}
+            out.append(("agentic_de_anomaly_detector_recall", labels, m["recall"]))
+            out.append(("agentic_de_anomaly_detector_false_alarm_rate", labels, m["false_positive_rate"]))
+    matched = (model_eval or {}).get("decision", {}).get("recall_at_matched_false_alarms", {})
+    for detector, recall in matched.items():
+        out.append(("agentic_de_anomaly_recall_at_matched_false_alarms", {"detector": detector}, recall))
     return out
 
 

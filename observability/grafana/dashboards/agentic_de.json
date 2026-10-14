@@ -838,7 +838,7 @@
     },
     {
       "type": "bargauge",
-      "title": "Golden set: failures and non-answers",
+      "title": "Golden set: fails + non-answers, by configuration",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -856,9 +856,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max by (config, result) (agentic_de_golden_results{result!~\"correct|pass\"})",
+          "expr": "max by (config) (sum by (config) (agentic_de_golden_results{result!~\"correct|pass\"}) or 0 * sum by (config) (agentic_de_golden_results))",
           "instant": true,
-          "legendFormat": "{{config}} {{result}}",
+          "legendFormat": "{{config}}",
           "refId": "A"
         }
       ],
@@ -956,15 +956,15 @@
     },
     {
       "type": "bargauge",
-      "title": "Anomaly detection: share of each labelled test set flagged",
-      "description": "From docs/eda/model_eval.json. 'normal' should be 0; every other set should be 1.",
+      "title": "Deterioration caught (simulated patients)",
+      "description": "Share of deteriorating panels (4 episode types, early and established) each detector flagged. From docs/eda/model_eval.json.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 12,
-        "w": 16,
+        "h": 6,
+        "w": 8,
         "x": 0,
         "y": 32
       },
@@ -974,9 +974,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max by (test_set, detector) (agentic_de_anomaly_eval_flag_rate)",
+          "expr": "max by (detector) (agentic_de_anomaly_detector_recall{suite=\"physiology\"})",
           "instant": true,
-          "legendFormat": "{{test_set}} - {{detector}}",
+          "legendFormat": "{{detector}}",
           "refId": "A"
         }
       ],
@@ -1013,6 +1013,126 @@
         }
       },
       "id": 19
+    },
+    {
+      "type": "bargauge",
+      "title": "False alarms on stable patients",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 32
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (detector) (agentic_de_anomaly_detector_false_alarm_rate{suite=\"physiology\"})",
+          "instant": true,
+          "legendFormat": "{{detector}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#2a78d6"
+          },
+          "max": 0.1
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true,
+        "namePlacement": "left",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 15
+        },
+        "minVizHeight": 14,
+        "maxVizHeight": 22,
+        "valueMode": "text",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "id": 20
+    },
+    {
+      "type": "bargauge",
+      "title": "Caught at the same false-alarm rate as NEWS2",
+      "description": "Model threshold set to raise as many false alarms as NEWS2; the fair comparison behind promoting it to a calibrated extra signal.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 16,
+        "x": 0,
+        "y": 38
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (detector) (agentic_de_anomaly_recall_at_matched_false_alarms)",
+          "instant": true,
+          "legendFormat": "{{detector}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#2a78d6"
+          },
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true,
+        "namePlacement": "left",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 15
+        },
+        "minVizHeight": 14,
+        "maxVizHeight": 22,
+        "valueMode": "text",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "id": 21
     },
     {
       "type": "stat",
@@ -1075,7 +1195,7 @@
         "graphMode": "none",
         "textMode": "value"
       },
-      "id": 20
+      "id": 22
     },
     {
       "type": "text",
@@ -1088,9 +1208,9 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Every request is a trace (`agent.request`) with one span per tool call (`agent.tool`, attribute `tool.outcome`).\n\nOpen **Explore \u2192 Jaeger**, service `databricks-agentic-de`, or Jaeger at http://localhost:16686."
+        "content": "Every request is a trace (`agent.request`) with one span per tool call (`agent.tool <name>`, attribute `tool.outcome`).\n\nOpen **Explore \u2192 Jaeger**, service `databricks-agentic-de`, or Jaeger at http://localhost:16686."
       },
-      "id": 21
+      "id": 23
     }
   ]
 }

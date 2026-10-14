@@ -47,11 +47,16 @@ single patient. See [Results so far](#results-so-far).
 healthcheck job, the unit row filter for restricted groups, Terraform and
 Cloud Run haven't run. No real-model (Claude) eval results exist yet.
 
-**Data and model checked:** an EDA of all 103,301 landed events found the
-pipeline input clean, one identity defect on readmission, and simulated
-vitals with no physiology. Tested properly, the vitals anomaly model
-caught fewer anomalies than the plain range rule, so the rules now decide
-and the model is advisory. See [`docs/eda/`](docs/eda/README.md). See
+**Data and model checked:**
+
+- An EDA of all 103,301 landed events found the pipeline input clean, one
+  identity defect on readmission, and simulated vitals with no physiology.
+- The first anomaly model did worse than a plain range rule.
+- The simulator now has physiology. On it, a retrained model catches 61% of
+  deteriorating patients at NEWS2's false-alarm rate (NEWS2: 47%). It runs
+  as a calibrated third layer after the rules and NEWS2.
+
+Every table: [`docs/results.md`](docs/results.md). See
 [Feature status](#feature-status) for each component, and
 [`docs/plan.md`](docs/plan.md) for the plan and phases.
 
@@ -112,15 +117,24 @@ Genie takes 13 s per question at the median; the deterministic metric path
 takes about 1.3 s on the same warehouse, which is why routine metrics go
 there.
 
-**Data and the anomaly model** ([`docs/eda/`](docs/eda/README.md)). The
-model was built to catch combinations of vitals a range check misses.
-On labelled test panels it caught 26% of single out-of-band vitals (the
-range rule: 100%) and 1-7% of the joint patterns. The simulator draws
-each vital uniformly and independently, so there was nothing joint to
-learn. `score_vitals_anomaly` now decides by rules and reports the model
-as advisory.
+**Data and the anomaly model** ([`docs/eda/`](docs/eda/README.md)).
 
-![Model vs range rule](docs/eda/model_vs_range_rule.png)
+- **Round 1.** The model was meant to catch combinations of vitals a range
+  check misses. It caught 26% of single out-of-band vitals (range rule:
+  100%) and 1-7% of joint patterns, because the simulator drew every vital
+  independently. Rules took over.
+- **Round 2.** `simulator/physiology.py` gives patients baselines,
+  correlated vitals, acuity by unit, and deterioration episodes. Model v2,
+  retrained on stable patients, was compared with the range rule, NEWS2
+  (the clinical early-warning score) and model v1.
+
+At NEWS2's 1.8% false-alarm rate on stable patients, model v2 catches 61%
+of deteriorating panels vs NEWS2's 47%, including hypertensive crisis,
+which NEWS2 can't see. The agent's tool now reports three layers (rules,
+NEWS2, calibrated model): together they catch 66% with 3.8% false alarms.
+That's on simulated physiology only, not real patients.
+
+![Detector comparison](docs/eda/detector_comparison.png)
 
 **Observability: one dashboard for human work, guardrails and quality.**
 OpenTelemetry carries traces and metrics from the agent to a local
@@ -132,7 +146,7 @@ requests driven through the real orchestrator and guardrails with scripted
 tool choices (`scripts/demo_traffic.py`), not real usage. The golden-set
 and anomaly panels are the real measured results.
 
-![Grafana dashboard](docs/images/grafana_dashboard.png)
+![Grafana dashboard](docs/images/stack/grafana_dashboard.png)
 
 ```bash
 docker compose --profile observability up -d          # Collector, Prometheus, Jaeger, Grafana
@@ -142,7 +156,7 @@ uv run python -m agent.telemetry --audit-log-path data/state/demo/audit_log.json
 ```
 
 Traces: every request is an `agent.request` span with one `agent.tool`
-span per tool call, tagged with the guardrail outcome (`refused`,
+span per tool call (`agent.tool <name>`), tagged with the guardrail outcome (`refused`,
 `withheld`, `suppressed`, `pending_approval`). Spans never carry the
 request text or results. Moving to Datadog, Dynatrace or Grafana Cloud is
 an exporter in `observability/otel-collector.yaml`, not a code change.
@@ -307,7 +321,7 @@ databricks-agentic-de/
 │   ├── comparisons/                # Genie golden-set results (results/) + Agent Bricks / Vertex AI plans
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
-├── tests/                          # mocked Anthropic client, zero network calls, 385 tests
+├── tests/                          # mocked Anthropic client, zero network calls, 427 tests
 ├── .github/workflows/              # ci.yml (lint+test), bundle-validate.yml (Databricks-gated)
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
@@ -840,7 +854,7 @@ suite mocks this) and other optional configuration.
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
 | `uv run orchestrator_healthcheck` | One scheduled-style DE-mode health check (needs `ANTHROPIC_API_KEY`); exit 0 healthy, 1 agent unavailable, 2 escalated |
-| `uv run pytest` | Run the full test suite (385 tests, zero network calls) |
+| `uv run pytest` | Run the full test suite (427 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
 | `databricks bundle validate` | Validate the Asset Bundle against a real workspace (Databricks-only) |
@@ -932,7 +946,8 @@ live infrastructure, or pure planning with no implementation at all
 | Retry + timeout (Claude calls, Kafka produce) | Complete |
 | Rate limiting (`simulator/producer.py:RateLimiter`) | Complete |
 | Graceful degradation on Claude API failure | Complete |
-| ONNX joint anomaly-scoring model + training pipeline (`ml/`) | Runs, but advisory only - `ml/evaluate_anomaly_model.py` showed it misses most anomalies the range rule catches (26% vs 100% of single out-of-band vitals) and 93-99% of in-band joint patterns, because the simulated training data has no correlation between vitals. `score_vitals_anomaly` now decides by deterministic rules. See `docs/eda/` |
+| Vitals deterioration detection: rules + NEWS2 (`agent/tools/early_warning.py`) + ONNX model v2 at a calibrated threshold (`ml/`, `agent/tools/anomaly_score.py`) | Measured on simulated physiology - model v2 catches 61% of deteriorating panels at NEWS2's false-alarm rate (NEWS2 47%); the three layers together 66% at 3.8% false alarms. Model v1 (uniform data) kept for comparison. Not validated on real patients. See `docs/results.md` |
+| Simulator physiology (`simulator/physiology.py`) | Complete - per-patient baselines, correlated blood pressure, unit acuity, labelled deterioration episodes, device artifacts; drives the event stream. The data on Databricks predates it |
 | EDA of the landed stream (`scripts/eda_landing.py`, `docs/eda/`) | Complete - volume, data-quality checks, vitals profile, patient identity drift; local DuckDB, no workspace needed |
 | Metrics layer (`agent/knowledge/metrics.yaml`, `agent/tools/metrics.py`, `scripts/build_genie_space.py`) | Runs - one definition per metric feeds both `compute_metric` and the live Genie space. Tests require Genie's SQL and `compute_metric` to return the same numbers. On the workspace, Genie switched from `unit ILIKE '%ICU%'` to `unit = 'ICU'`, mapped 'intensive care' to ICU, and refused PICU, matching compute_metric |
 | Genie glue + guardrails (`agent/tools/genie.py`: `ask_genie` routes DA questions to a Genie space; PHI-request refusal, SQL schema check, masking backstop incl. leaked values in Genie's text, small-count suppression on any `COUNT(...)` column with Genie's text withheld, question/SQL consistency check) | Runs - evaluated on the live Genie space with the 27-question golden set (two runs). Run 2's recorded answers through the current guard: 21/21 answerable correct, 6/6 governance probes passed. Each guard change came from a failure a run exposed, and has a regression test. Mock tests cover the failure paths |
@@ -961,7 +976,7 @@ live infrastructure, or pure planning with no implementation at all
 ## Testing
 
 ```bash
-uv run pytest            # full suite: 385 tests, ~55s, zero network calls
+uv run pytest            # full suite: 427 tests, ~55s, zero network calls
 uv run pytest -q         # quiet output
 uv run pytest tests/test_masking_guard.py tests/test_prompt_injection_guard.py  # the two core guardrail proofs
 uv run ruff check .      # lint
@@ -1004,7 +1019,8 @@ citation, and the swap-in path if you want to build against it directly.
 - [`docs/flows/guardrails.md`](docs/flows/guardrails.md) — escalation ceiling, kill switch, audit trail, and behavioral anomaly detection in detail.
 - [`docs/agent_problem_catalog.pdf`](docs/agent_problem_catalog.pdf) — 104 real-time DE/DA problems on this Databricks stack (pipelines, governance, overload, outages, timestamps, data content, changes to production, analyst SQL), how the agent should handle each, its repo status, and the agent training/eval plan. Rebuild with `uv run --no-project --with reportlab --with pyyaml python scripts/build_problem_catalog.py`.
 - [`docs/workflow_and_tech_stack.pdf`](docs/workflow_and_tech_stack.pdf) (also [`.docx`](docs/workflow_and_tech_stack.docx)) — the eight workflows (data, analyst question, incident, approval and earned autonomy, deploy, measurement, observability, development), tech stack with versions and status, guardrails, next steps. Built by `scripts/build_workflow_doc.py`.
-- [`docs/eda/`](docs/eda/README.md) — EDA of the landed stream and the anomaly-model evaluation.
+- [`docs/results.md`](docs/results.md) — every measured result in one place: pipeline counts, all 27 golden questions per configuration, latency, EDA checks, detector comparisons, and a screenshot of each running stack. Generated by `scripts/build_results_page.py`.
+- [`docs/eda/`](docs/eda/README.md) — EDA of the landed stream and both rounds of the anomaly-model evaluation.
 - [`docs/comparisons/`](docs/comparisons/) — Genie golden-set results and findings; Agent Bricks and Vertex AI evaluation plans (pending).
 - [`docs/restructure-proposal.md`](docs/restructure-proposal.md) — optional layout suggestions surfaced while writing this documentation; not applied.
 - [`AGENTS.md`](AGENTS.md) — instructions for AI coding agents working in this repo.

@@ -131,14 +131,19 @@ def generate_admitted_event(
     )
 
 
-def generate_vitals_event(patient_id: str, encounter_id: str, itemid: str) -> PatientEvent:
-    low, high = VITAL_RANGES[itemid]
-    if random.random() < OUT_OF_RANGE_PROBABILITY:
-        # Push outside the band on a random side for a realistic outlier.
-        span = high - low
-        value = random.choice([low - random.uniform(0.1, span * 0.5), high + random.uniform(0.1, span * 0.5)])
-    else:
-        value = random.uniform(low, high)
+def generate_vitals_event(
+    patient_id: str, encounter_id: str, itemid: str, value: float | None = None
+) -> PatientEvent:
+    """`value` comes from the patient's physiology (simulator/physiology.py) when
+    the population drives it; without one, the original uniform draw is used."""
+    if value is None:
+        low, high = VITAL_RANGES[itemid]
+        if random.random() < OUT_OF_RANGE_PROBABILITY:
+            # Push outside the band on a random side for a realistic outlier.
+            span = high - low
+            value = random.choice([low - random.uniform(0.1, span * 0.5), high + random.uniform(0.1, span * 0.5)])
+        else:
+            value = random.uniform(low, high)
 
     vital = VitalReading(itemid=itemid, value=round(value, 1), valueuom=_VALUEUOM_BY_ITEM[itemid])
     return PatientEvent(

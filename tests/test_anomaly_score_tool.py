@@ -125,7 +125,7 @@ def test_rules_flag_an_out_of_band_vital_even_when_the_model_does_not(tiny_model
 
     assert payload["is_anomaly"] is True
     assert payload["model_is_anomaly"] is False
-    assert payload["decided_by"] == "rules"
+    assert payload["decided_by"] == "rules+news2"  # SpO2 80 is also a NEWS2 red parameter
     assert payload["rule_findings"] == ["spo2=80 is below the alert band 88-100"]
 
 
@@ -149,4 +149,49 @@ def test_a_normal_reading_fires_no_rule(tiny_model_path):
     payload = json.loads(score_vitals_anomaly(NORMAL_VITALS, model_path=tiny_model_path).content)
 
     assert payload["rule_findings"] == []
+    assert payload["model_status"].startswith("advisory")
+
+
+EARLY_SEPSIS = {"heart_rate": 104, "spo2": 95, "resp_rate": 21, "temp_c": 38.4, "sbp": 108, "dbp": 66}
+
+
+def test_news2_is_reported_and_can_decide_alone(tiny_model_path, monkeypatch):
+    from agent.tools import anomaly_score
+
+    class NeverFlags:
+        def get_inputs(self):
+            return [type("Input", (), {"name": "vitals_panel"})()]
+
+        def run(self, _outputs, _feed):
+            return [[[1]], [[0.2]]]
+
+    monkeypatch.setattr(anomaly_score, "_load_session", lambda _path: NeverFlags())
+
+    payload = json.loads(score_vitals_anomaly(EARLY_SEPSIS, model_path=tiny_model_path).content)
+
+    assert payload["rule_findings"] == []  # every value is inside its alert band
+    assert payload["news2"]["score"] == 6 and payload["news2"]["risk"] == "medium"
+    assert (payload["is_anomaly"], payload["decided_by"]) == (True, "news2")
+
+
+def test_committed_model_uses_its_evaluated_threshold():
+    """The default artifact is scored at the threshold ml/evaluate_anomaly_model.py
+    justified (ml/models/vitals_anomaly_calibration.json), not its own label."""
+    from agent.tools.anomaly_score import DEFAULT_CALIBRATION_PATH
+
+    calibration = json.loads(DEFAULT_CALIBRATION_PATH.read_text(encoding="utf-8"))
+    payload = json.loads(score_vitals_anomaly(EARLY_SEPSIS).content)
+
+    assert payload["model_status"].startswith("calibrated")
+    assert payload["model_is_anomaly"] == (-payload["score"] > calibration["score_threshold"])
+
+
+def test_calibration_for_another_model_is_never_applied(tiny_model_path, tmp_path):
+    calibration = tmp_path / "calibration.json"
+    calibration.write_text(json.dumps({"promoted": False, "score_threshold": -99}))
+
+    payload = json.loads(
+        score_vitals_anomaly(NORMAL_VITALS, model_path=tiny_model_path, calibration_path=calibration).content
+    )
+
     assert payload["model_status"].startswith("advisory")

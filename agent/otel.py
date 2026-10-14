@@ -1,7 +1,7 @@
 """OpenTelemetry tracing for this project's NON-LLM parts — the simulator's
 Kafka publish loop (`simulator/producer.py:send`), the DE-mode
 pipeline-health tool calls (`agent/tools/pipeline_health.py`), and every
-orchestrator request (`agent.request`) and tool call (`agent.tool`, with the
+orchestrator request (`agent.request`) and tool call (`agent.tool <name>`, with the
 guardrail outcome from `tool_outcome`). Spans carry ids, names and outcomes
 only - never the question, tool inputs or results. LLM-call
 tracing already has its own, separate mechanism (`agent/llm.py:Tracer`,
