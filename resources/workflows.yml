@@ -48,6 +48,13 @@ targets:
           tasks:
             - task_key: run_de_healthcheck
               environment_key: agent_env
+              # No retries: a failed run is the alert for a new problem. Serverless
+              # retried it by default, and the retry - seeing only known problems -
+              # succeeded and swallowed the alert (found on a live run). The next
+              # scheduled run is the retry. max_retries alone didn't stop it:
+              # serverless auto-optimization retries on its own unless disabled.
+              max_retries: 0
+              disable_auto_optimization: true
               python_wheel_task:
                 package_name: databricks_agentic_de
                 entry_point: orchestrator_healthcheck
@@ -128,6 +135,7 @@ targets:
           tasks:
             - task_key: run_de_healthcheck
               job_cluster_key: agent_single_node
+              max_retries: 0 # a failed run is the alert; see the free target
               python_wheel_task:
                 package_name: databricks_agentic_de
                 entry_point: orchestrator_healthcheck

@@ -58,3 +58,4 @@ data/landing_v4/
 data/landing_v5/
 data/state/steward_*.json
 data/cache/
+data/cd_run/

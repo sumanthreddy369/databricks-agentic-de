@@ -169,3 +169,16 @@ def test_rules_planner_keeps_keyword_ranking(tmp_path, capsys, monkeypatch):
         agent=_agent(tmp_path, _ScriptedClaude(tool_calls=[("check_job_status", {})])),
     )
     assert "RUNBOOK_SEARCH" not in os.environ
+
+
+def test_health_check_job_is_never_retried():
+    """A failed run is the alert for a new problem. A retry sees only known
+    problems, succeeds, and the run ends green - the alert is lost (seen live
+    on serverless, which retries unless told not to)."""
+    workflows = yaml.safe_load((REPO_ROOT / "resources" / "workflows.yml").read_text())
+    tasks = [
+        task
+        for target in workflows["targets"].values()
+        for task in target.get("resources", {}).get("jobs", {}).get("agent_pipeline_healthcheck", {}).get("tasks", [])
+    ]
+    assert tasks and all(t["max_retries"] == 0 for t in tasks)

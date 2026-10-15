@@ -1,0 +1,57 @@
+{
+  "workspace": "Databricks Free Edition",
+  "date": "2026-10-15",
+  "how": "scripts/setup_workspace.py --run-pipeline from a laptop with the CLI login (the same stages as .github/workflows/bundle.yml's integration job, which waits for repo secrets)",
+  "stages": [
+    {
+      "stage": "Unity Catalog objects",
+      "result": "11 SQL statements ran (catalog, schemas, volumes incl. ops.runbooks, decisions table, mask and row-filter functions); 17 group/grant statements left for a person"
+    },
+    {
+      "stage": "Bundle deploy -t free",
+      "result": "deployed: streaming + reference pipelines, roster job, serverless health-check job"
+    },
+    {
+      "stage": "Pipeline run",
+      "result": "update c1e09d5e COMPLETED"
+    },
+    {
+      "stage": "Identity checks on the workspace (--require-all)",
+      "result": "passed: 14/14 shared ids, 27/27 + 18/18 + 19/19 duplicates",
+      "scores": {
+        "two_people_one_id": [
+          14,
+          14
+        ],
+        "one_person_two_ids": [
+          27,
+          27
+        ],
+        "one_person_two_ids_variant": [
+          18,
+          18
+        ],
+        "one_person_two_ids_renamed": [
+          19,
+          19
+        ]
+      }
+    },
+    {
+      "stage": "Genie space",
+      "result": "updated from governance/genie/space.json"
+    },
+    {
+      "stage": "Serverless health check (job 836357122055965)",
+      "result": "run 555522090914382 SUCCESS in 86 s: 4 findings, all M2 identity (known) - but only on a second attempt"
+    },
+    {
+      "stage": "Bug found and fixed",
+      "result": "serverless retried the deliberately failed run (new problem = failed run = alert); the retry saw only known problems and succeeded, swallowing the alert. max_retries: 0 was not enough; disable_auto_optimization: true stopped it. Verified: run 428177390065951 with all-new problems FAILED once, no retry."
+    },
+    {
+      "stage": "Stop everything",
+      "result": "warehouse stopped, pipelines idle"
+    }
+  ]
+}
