@@ -104,7 +104,7 @@ def check_expectation_metrics(state_path: Path) -> ToolResult:
                 failing.append(
                     {"table": table, "expectation": expectation, "failure_count": metrics["failure_count"]}
                 )
-    payload = {"ok": not failing, "failing_expectations": failing}
+    payload = {"ok": not failing, "failing_expectations": failing, "source": "local_state_file"}
     return ToolResult(tool_use_id="", content=json.dumps(payload))
 
 
@@ -120,7 +120,7 @@ def check_job_status(state_path: Path) -> ToolResult:
     unhealthy = {
         name: info["status"] for name, info in jobs.items() if info.get("status") not in ("RUNNING", "SUCCESS")
     }
-    payload = {"ok": not unhealthy, "jobs": jobs, "unhealthy": unhealthy}
+    payload = {"ok": not unhealthy, "jobs": jobs, "unhealthy": unhealthy, "source": "local_state_file"}
     return ToolResult(tool_use_id="", content=json.dumps(payload))
 
 

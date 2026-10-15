@@ -13,7 +13,7 @@ and tests/test_population_tick.py's deterministic loop the same code path.
 
 import random
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 from common.contracts import VITAL_ITEM_TYPES
@@ -55,18 +55,27 @@ def _jittered_next_due(now: datetime) -> datetime:
 
 class Population:
     def __init__(
-        self, target_size: int = 1000, rng: random.Random | None = None, identity_collision_rate: float = 0.0
+        self,
+        target_size: int = 1000,
+        rng: random.Random | None = None,
+        identity_collision_rate: float = 0.0,
+        duplicate_person_rate: float = 0.0,
     ) -> None:
-        """`identity_collision_rate`: chance that a new admission is a different
-        person given an already-issued patient_id - the real-world identity
-        defect (problem catalog M2), injected on purpose so the Silver check
-        can be measured. 0 by default: ids are unique."""
+        """The two real-world identity defects (problem catalog M2), injected
+        on purpose so the Silver checks can be measured; both 0 by default:
+        - `identity_collision_rate`: a new admission is a different person
+          given an already-issued patient_id (two people, one id);
+        - `duplicate_person_rate`: a new admission is a returning person
+          registered under a new patient_id and MRN (one person, two ids)."""
         self.target_size = target_size
         self._rng = rng or random
         self.active: dict[str, ActiveEncounter] = {}  # keyed by encounter_id
         self.identity_collision_rate = identity_collision_rate
         self.issued_patient_ids: list[str] = []
         self.identity_collisions = 0
+        self.duplicate_person_rate = duplicate_person_rate
+        self.issued_people: list[PatientSnapshot] = []
+        self.duplicate_people = 0
 
     def admit_new_patients(self, count: int, now: datetime) -> list[PatientEvent]:
         events: list[PatientEvent] = []
@@ -78,6 +87,14 @@ class Population:
                 patient_id = f"pt_{self._rng.getrandbits(32):08x}"
                 self.issued_patient_ids.append(patient_id)
             patient = generate_patient_snapshot(patient_id)
+            if self.issued_people and self._rng.random() < self.duplicate_person_rate:
+                person = self._rng.choice(self.issued_people)
+                patient = replace(
+                    patient, **{k: getattr(person, k) for k in ("full_name", "birth_date", "gender", "region")}
+                )
+                self.duplicate_people += 1
+            else:
+                self.issued_people.append(patient)
             encounter_id = f"enc_{uuid.uuid4().hex[:8]}"
             event = generate_admitted_event(patient, encounter_id)
             events.append(event)

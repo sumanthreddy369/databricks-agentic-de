@@ -67,3 +67,15 @@ def test_identity_collisions_are_injected_only_on_request():
     ids = [e.patient_id for e in events]
     assert population.identity_collisions > 50
     assert len(ids) - len(set(ids)) == population.identity_collisions
+
+
+def test_duplicate_people_get_a_new_id_but_keep_their_identity():
+    population = Population(target_size=0, rng=random.Random(13), duplicate_person_rate=0.05)
+    events = population.admit_new_patients(2000, datetime(2026, 1, 1, tzinfo=UTC))
+    ids = [e.patient_id for e in events]
+    people = {(e.patient.full_name, e.patient.birth_date) for e in events}
+    assert len(set(ids)) == len(ids)  # every admission has its own patient_id
+    assert population.duplicate_people > 50
+    # Every duplicate shares a name and birth date with an earlier person. Chance matches between two
+    # different people can add more (a small name pool) - why candidates go to a steward, never merged.
+    assert len(ids) - len(people) >= population.duplicate_people

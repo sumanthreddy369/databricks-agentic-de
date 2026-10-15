@@ -34,12 +34,13 @@ not once per `OrchestratorAgent()`.
 
 import asyncio
 import atexit
+import os
 import sys
 import threading
 from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp.client.stdio import get_default_environment, stdio_client
 
 from agent.llm import ToolResult
 
@@ -47,6 +48,22 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SERVER_MODULE = "mcp_server.server"
 _START_TIMEOUT_SECONDS = 30.0
 _CALL_TIMEOUT_SECONDS = 60.0
+
+
+# Settings the tool server needs from this process. Without an explicit env,
+# the MCP SDK starts the server with only a few system variables (PATH,
+# HOME, ...): DATABRICKS_HOST/TOKEN/PIPELINE_IDS never arrived, so the DE
+# tools silently fell back to the local state file and a live health check
+# reported "healthy" while the pipeline was dropping rows. Found on the first
+# live run; tests/test_mcp_server_tools.py guards it.
+_FORWARDED_PREFIXES = ("DATABRICKS_", "GENIE_", "OTEL_", "GCP_", "LANGFUSE_")
+_FORWARDED_NAMES = ("PIPELINE_STATE_PATH", "AUDIT_LOG_PATH")
+
+
+def server_environment() -> dict[str, str]:
+    env = get_default_environment()
+    env.update({k: v for k, v in os.environ.items() if k.startswith(_FORWARDED_PREFIXES) or k in _FORWARDED_NAMES})
+    return env
 
 
 class MCPToolBridge:
@@ -74,7 +91,7 @@ class MCPToolBridge:
         self._start_lock = threading.Lock()
 
     def _server_params(self) -> StdioServerParameters:
-        return StdioServerParameters(command=self.command, args=self.args, cwd=self.cwd)
+        return StdioServerParameters(command=self.command, args=self.args, cwd=self.cwd, env=server_environment())
 
     # --- lifecycle -----------------------------------------------------
 

@@ -273,6 +273,56 @@ def panels() -> list[dict]:
             },
         }
     )
+    p.append(row("Pipeline on Databricks - newest workspace snapshot (scripts/workspace_snapshot.py)", 51))
+    p.append(
+        stat(
+            "Names / MRNs masked in Gold",
+            "agentic_de_phi_masked_share",
+            {"h": 5, "w": 6, "x": 0, "y": 52},
+            unit="percentunit",
+            decimals=0,
+            thresholds=[{"color": CRITICAL, "value": None}, {"color": GOOD, "value": 1}],
+            description="Share of Gold patients whose name and MRN Unity Catalog returns redacted. Anything below "
+            "100% is a governance failure.",
+        )
+    )
+    p.append(
+        stat(
+            "Identity conflicts flagged (M2)",
+            "agentic_de_identity_conflicts_flagged",
+            {"h": 5, "w": 6, "x": 6, "y": 52},
+            thresholds=[{"color": GOOD, "value": None}, {"color": WARNING, "value": 1}],
+            description="patient_ids carrying two people. Flagged, never merged: a data steward decides.",
+        )
+    )
+    p.append(
+        stat(
+            "Snapshot age",
+            "agentic_de_pipeline_snapshot_age_hours",
+            {"h": 5, "w": 6, "x": 12, "y": 52},
+            unit="h",
+            decimals=1,
+            thresholds=[{"color": GOOD, "value": None}, {"color": WARNING, "value": 24}],
+        )
+    )
+    p.append(
+        bars(
+            "Records failing each expectation (event log)",
+            'agentic_de_pipeline_expectation_records{result="failed"}',
+            "{{dataset}} - {{expectation}}",
+            {"h": 9, "w": 12, "x": 0, "y": 57},
+            description="Drops (impossible vitals) and flags (identity conflicts) are expected and explained; a "
+            "hard-stop expectation failing would stop the pipeline.",
+        )
+    )
+    p.append(
+        bars(
+            "Rows per table",
+            'agentic_de_pipeline_table_rows{table=~"gold.*|silver.silver_patient_identity_conflicts"}',
+            "{{table}}",
+            {"h": 9, "w": 12, "x": 12, "y": 57},
+        )
+    )
     for i, panel in enumerate(p, 1):
         panel["id"] = i
     return p

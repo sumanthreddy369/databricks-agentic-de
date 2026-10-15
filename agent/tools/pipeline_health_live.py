@@ -81,7 +81,10 @@ def check_expectation_metrics(client: DatabricksClient) -> ToolResult:
             )
     except DatabricksError as exc:
         return _error(str(exc))
-    return ToolResult(tool_use_id="", content=json.dumps({"ok": not failing, "failing_expectations": failing}))
+    return ToolResult(
+        tool_use_id="",
+        content=json.dumps({"ok": not failing, "failing_expectations": failing, "source": "databricks"}),
+    )
 
 
 def check_job_status(client: DatabricksClient) -> ToolResult:
@@ -103,7 +106,8 @@ def check_job_status(client: DatabricksClient) -> ToolResult:
         return _error(str(exc))
     unhealthy = {name: info["status"] for name, info in jobs.items() if info["status"] not in _HEALTHY_STATUSES}
     return ToolResult(
-        tool_use_id="", content=json.dumps({"ok": not unhealthy, "jobs": jobs, "unhealthy": unhealthy})
+        tool_use_id="",
+        content=json.dumps({"ok": not unhealthy, "jobs": jobs, "unhealthy": unhealthy, "source": "databricks"}),
     )
 
 

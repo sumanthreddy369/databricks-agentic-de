@@ -59,6 +59,11 @@ METRICS = {
     "agentic_de_anomaly_eval_flag_rate": "Share of each labelled test set flagged, by suite and detector",
     "agentic_de_anomaly_detector_recall": "Share of should-flag panels each detector caught, by suite",
     "agentic_de_anomaly_detector_false_alarm_rate": "Share of stable panels each detector flagged, by suite",
+    "agentic_de_pipeline_table_rows": "Rows per table in the newest Databricks workspace snapshot",
+    "agentic_de_pipeline_expectation_records": "Records passed / failed per pipeline expectation (event log)",
+    "agentic_de_phi_masked_share": "Share of Gold patients whose name and MRN are masked (should be 1)",
+    "agentic_de_identity_conflicts_flagged": "patient_ids flagged as two people on one id (catalog M2)",
+    "agentic_de_pipeline_snapshot_age_hours": "Hours since the newest workspace snapshot",
     "agentic_de_anomaly_recall_at_matched_false_alarms": "Recall with the model's threshold matched to NEWS2's "
     "false-alarm rate on stable patients",
 }
@@ -103,6 +108,13 @@ def newest_golden_report(dirs=GOLDEN_DIRS) -> dict | None:
     return best
 
 
+def newest_workspace_snapshot(dirs=GOLDEN_DIRS[:1]) -> dict | None:
+    """Newest scripts/workspace_snapshot.py output (pipeline health on Databricks)."""
+    snaps = [_read_json(p) for d in dirs for p in Path(d).glob("workspace_*.json")]
+    snaps = [s for s in snaps if isinstance(s, dict) and "measured_at" in s]
+    return max(snaps, key=lambda s: s["measured_at"], default=None)
+
+
 def snapshot(
     audit_lines: list[dict],
     state: dict,
@@ -111,6 +123,7 @@ def snapshot(
     *,
     now: datetime,
     days: int = 7,
+    workspace: dict | None = None,
 ) -> list[tuple[str, dict, float]]:
     """[(metric name, labels, value)]. Pure: tested without any exporter."""
     out: list[tuple[str, dict, float]] = []
@@ -175,6 +188,25 @@ def snapshot(
     matched = (model_eval or {}).get("decision", {}).get("recall_at_matched_false_alarms", {})
     for detector, recall in matched.items():
         out.append(("agentic_de_anomaly_recall_at_matched_false_alarms", {"detector": detector}, recall))
+
+    if workspace:
+        for t in workspace.get("tables", []):
+            out.append(("agentic_de_pipeline_table_rows", {"table": t["table"]}, t["rows"]))
+        for e in workspace.get("expectations", []):
+            for result in ("passed", "failed"):
+                labels = {"dataset": e["dataset"], "expectation": e["expectation"], "result": result}
+                out.append(("agentic_de_pipeline_expectation_records", labels, e[result]))
+        masks = workspace.get("masks") or {}
+        if masks.get("patients"):
+            masked = min(masks["names_masked"], masks["mrns_masked"]) / masks["patients"]
+            out.append(("agentic_de_phi_masked_share", {}, round(masked, 4)))
+        identity = workspace.get("identity_check") or {}
+        if "flagged_two_people_one_id" in identity:
+            out.append(("agentic_de_identity_conflicts_flagged", {}, identity["flagged_two_people_one_id"]))
+        measured = datetime.strptime(workspace["measured_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        out.append(
+            ("agentic_de_pipeline_snapshot_age_hours", {}, round((now - measured).total_seconds() / 3600, 2))
+        )
     return out
 
 
@@ -197,6 +229,7 @@ class _Source:
                     _read_json(MODEL_EVAL_PATH),
                     now=datetime.now(UTC),
                     days=self.days,
+                    workspace=newest_workspace_snapshot(),
                 )
                 self._at = time.monotonic()
         return [(labels, value) for metric, labels, value in self._rows if metric == name]

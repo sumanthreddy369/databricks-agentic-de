@@ -47,10 +47,20 @@ the regenerated physiology data (103,407 events):
 and the guard suppressed it. See [Results so far](#results-so-far) and
 every question in [`docs/results.md`](docs/results.md).
 
-**Still mock-tested or not run:** the live pipeline-control tools
-(restart, expectation metrics) are tested only against mocks. The agent
-healthcheck job, the unit row filter for restricted groups, Terraform and
-Cloud Run haven't run. No real-model (Claude) eval results exist yet.
+**Health check, no AI needed:** the scheduled DE health check runs as a
+serverless job on Databricks Free Edition. A deterministic rules planner
+decides from the problem catalog, so it needs no Anthropic key and no
+stored token. Running it live found and fixed two silent failures:
+
+- **Tools never went live.** The tool server never received the Databricks
+  settings, so a live check reported "healthy" while rows were being
+  dropped.
+- **Audit writes failed on volumes.** Unity Catalog volumes reject
+  append-mode writes, so every audit write failed.
+
+**Still not run:** pipeline restart through the live API, the unit row
+filter for restricted groups, Terraform and Cloud Run. No real-model
+(Claude) eval results exist yet.
 
 **Data and model checked:**
 
@@ -105,6 +115,8 @@ Genie once; the guarded result is the same Genie answer passed through
 | Genie + guardrails: answerable correct | 19 / 21 | 21 / 21 | 21 / 21 |
 | Genie + guardrails: governance probes passed | 4 / 6 | 6 / 6 (after the fix below) | **6 / 6** |
 | Metric path (`compute_metric`, no LLM; mapped questions only) | 19 / 19 answered, 1 / 1 probe | 20 / 20 answered, 1 / 1 probe | 20 / 20 answered, 1 / 1 probe |
+
+Run 4 (Free Edition, data with both identity defects): Genie + guardrails 26/27 - 20 correct, 6/6 probes, and one question Genie was still working on after 120 s, returned as no answer rather than a guess (the metric path answered it in about 2 s). Genie alone again reported a small group (4 patients); the guard suppressed it.
 
 Run 1 is as recorded. One of its probes (average length of stay) turned
 out to be answerable from encounter history, so run 2 replaced it with
@@ -334,7 +346,7 @@ databricks-agentic-de/
 │   ├── comparisons/                # Genie golden-set results (results/) + Agent Bricks / Vertex AI plans
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
-├── tests/                          # mocked Anthropic client, zero network calls, 429 tests
+├── tests/                          # mocked Anthropic client, zero network calls, 442 tests
 ├── .github/workflows/              # ci.yml (lint+test), bundle-validate.yml (Databricks-gated)
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
@@ -866,8 +878,8 @@ suite mocks this) and other optional configuration.
 | `uv run python scripts/stop_everything.py --dry-run` | Show (then, without `--dry-run`, stop) everything in the workspace that can cost money: job runs and schedules, pipelines, warehouses, clusters. No data deleted |
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
-| `uv run orchestrator_healthcheck` | One scheduled-style DE-mode health check (needs `ANTHROPIC_API_KEY`); exit 0 healthy, 1 agent unavailable, 2 escalated |
-| `uv run pytest` | Run the full test suite (429 tests, zero network calls) |
+| `uv run python -m agent.healthcheck [--planner rules\|claude] [--pipeline-ids JSON]` | One DE-mode health check; the rules planner is the default without `ANTHROPIC_API_KEY`. Exit 0 healthy, 1 agent unavailable, 2 escalated, 3 waiting for approval |
+| `uv run pytest` | Run the full test suite (442 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
 | `databricks bundle validate` | Validate the Asset Bundle against a real workspace (Databricks-only) |
@@ -966,18 +978,18 @@ live infrastructure, or pure planning with no implementation at all
 | Genie glue + guardrails (`agent/tools/genie.py`: `ask_genie` routes DA questions to a Genie space; PHI-request refusal, SQL schema check, masking backstop incl. leaked values in Genie's text, small-count suppression on any `COUNT(...)` column with Genie's text withheld, question/SQL consistency check) | Runs - evaluated on the live Genie space with the 27-question golden set (two runs). Run 2's recorded answers through the current guard: 21/21 answerable correct, 6/6 governance probes passed. Each guard change came from a failure a run exposed, and has a regression test. Mock tests cover the failure paths |
 | DuckDB-backed local Gold stand-in (`agent/tools/data_query.py`) | Complete |
 | Live-workspace DA queries — SQL Statement Execution API against `healthcare_agentic_de.gold` (`agent/databricks_client.py`, `data_query.py`, `metrics.py`) | Runs - the golden set ran `compute_metric` and its truth SQL against the trial workspace's serverless warehouse (about 1.3 s per metric). No-op unless `DATABRICKS_HOST`/`DATABRICKS_TOKEN`/`DATABRICKS_WAREHOUSE_ID` are set |
-| Live-workspace DE tools — expectation metrics, pipeline status, restart via the Pipelines API (`agent/tools/pipeline_health_live.py`) | Stubbed — tested against a mocked transport only; never run against a real workspace. `detect_schema_drift`/`quarantine_bad_records` have no live equivalent and return an escalate-instead error; `notify_and_page` has no paging integration yet |
+| Live-workspace DE tools — expectation metrics, pipeline status, restart via the Pipelines API (`agent/tools/pipeline_health_live.py`) | Runs - run against Databricks Free Edition: `check_expectation_metrics` reports the latest update's failures (286 dropped vitals, 27 + 16 identity flags), `check_job_status` the pipeline state; each result says which backend answered (`source`). Restart not yet exercised live. `detect_schema_drift`/`quarantine_bad_records` have no live equivalent and return an escalate-instead error; `notify_and_page` records an incident (no paging integration) |
 | Observability — OpenTelemetry traces (`agent.request` / `agent.tool` spans) and metrics (`agent/telemetry.py`) → Collector → Prometheus + Jaeger → Grafana (`observability/`, `docker-compose.yml` profile `observability`) | Runs locally - exercised end to end in Docker on demo traffic: 16 metrics in Prometheus, request traces in Jaeger, dashboard in Grafana. Not yet fed by real usage or the Lakeflow event log. Langfuse (LLM calls) remains no-op unless configured |
 | GCP Secret Manager integration (`agent/secrets.py`) | Complete (no-op unless `GCP_PROJECT_ID` is set) |
-| Scheduled DE health-check job (`agent/healthcheck.py`, `resources/workflows.yml:agent_pipeline_healthcheck`) | Partial — CLI tested locally, and the built wheel was installed into a clean venv and its entry point, MCP server, and ONNX model exercised from there; the job itself has never run on Databricks. Needs a `healthcare_agentic_de` secret scope and the `ops.agent_state` volume first |
+| Scheduled DE health-check job (`agent/healthcheck.py`, `resources/workflows.yml:agent_pipeline_healthcheck`, `agent/rules_planner.py`) | Runs - as a serverless job on Databricks Free Edition: no cluster, no secrets (the run authenticates as itself), and with no Anthropic key the deterministic rules planner decides from the catalog's autonomy levels. On the live pipeline it found 3 problems, paged for the two identity checks (M2, L1), queued a quarantine for approval (B1, L2) and exited 2 so the run fails and emails the owner. State and audit log in the ops volume. Schedule paused (development mode) |
 | Real-time problem catalog + `lookup_problem` tool (`agent/knowledge/problem_catalog.yaml`, `agent/tools/problem_catalog.py`) | Complete - 104 problems with expected response and autonomy level; matching tested on hand-written incident descriptions (not an independent benchmark) |
 | Scenario evals (`evals/`) | Partial - harness, graders, and 14 scenarios tested with a scripted model; **not yet run against the real model**, so no pass rate exists |
 | CI — lint + test (`.github/workflows/ci.yml`) | Complete |
 | CI — bundle validate (`.github/workflows/bundle-validate.yml`) | Complete (its skip path is what actually runs here; `databricks bundle validate` itself is untested) |
 | Lakeflow (DLT) medallion pipeline (`pipeline/`) | Runs - on Databricks Free Edition (`free` target) with the regenerated data, counts matching the local prediction and the event log recording every expectation (`docs/results.md`); earlier on the GCP trial workspace (dev, serverless, triggered) and run end to end on synthetic data; layer counts reconcile. Dataset graph also checked statically by `tests/test_dlt_pipeline_graph.py`. Not yet run continuously or on a Kafka source |
-| Patient identity check (`silver_patient_identity_conflicts`, problem catalog M2) | Partial - flags patient_ids admitted more than once with a different name or birth date: two people on one id (warn-only; counts, never names; a steward decides). Graph-tested; its logic finds all 23 collisions injected into the regenerated data (13 accidental ones in the original). Not yet run on the workspace |
+| Patient identity checks (`silver_patient_identity_conflicts`, `silver_patient_duplicate_candidates`, problem catalog M2) | Runs - on Databricks Free Edition with both defects injected: two people on one patient_id 16 of 16 flagged, one person under two patient_ids 27 of 27 candidate groups flagged. Warn-only, counts and hashed keys (never names); a steward decides. Exact name + birth date matching can also pair two different people (the simulator's small name pool produced one) |
 | Unity Catalog masks + row filters (`governance/05_unity_catalog/`, declared in `pipeline/04_gold/`) | Partial - column masks verified on the workspace (all names/MRNs redacted in Gold); row filter attached but not tested with a restricted group; grants and account groups not applied (`CREATE GROUP` isn't how account groups are created) |
-| Databricks Asset Bundle (`databricks.yml`, `resources/*.yml`) | Runs - deployed to the dev target; the agent healthcheck job is prod-only until it's reworked for serverless (the trial workspace is serverless-only) |
+| Databricks Asset Bundle (`databricks.yml`, `resources/*.yml`) | Runs - deployed to the `free` target (Databricks Free Edition: both pipelines, the roster job, the serverless health-check job) and earlier to `dev` (GCP trial, now locked); the classic-cluster health-check job remains prod-only |
 | Databricks Vector Search knowledge tool (`agent/tools/knowledge_search.py`) | Stubbed — real graceful-degradation code path, never queried a live index |
 | Lakehouse Federation to BigQuery example | Stubbed — illustrative SQL, never run |
 | Terraform GCP infrastructure (`infra/terraform/`) | Stubbed — structurally correct, `terraform apply` never run |
@@ -990,7 +1002,7 @@ live infrastructure, or pure planning with no implementation at all
 ## Testing
 
 ```bash
-uv run pytest            # full suite: 429 tests, ~55s, zero network calls
+uv run pytest            # full suite: 442 tests, ~55s, zero network calls
 uv run pytest -q         # quiet output
 uv run pytest tests/test_masking_guard.py tests/test_prompt_injection_guard.py  # the two core guardrail proofs
 uv run ruff check .      # lint

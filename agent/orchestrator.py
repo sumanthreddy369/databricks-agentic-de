@@ -385,7 +385,7 @@ class OrchestratorAgent:
                 tools=tools,
                 dispatch=self._dispatch,
             )
-        except Exception:
+        except Exception as exc:
             # Graceful-degradation guardrail, deliberate: if the Claude API
             # call path raises (network outage, auth failure, rate limit
             # exhausted past retries, etc.), we do NOT let that crash the
@@ -395,7 +395,14 @@ class OrchestratorAgent:
             # independently of whether this agent is reachable — the agent is
             # an automation/convenience layer on top of that guarantee, never
             # a replacement for it, so its own unavailability must fail safe.
-            logger.error("claude_call_failed_graceful_degradation", mode=resolved_mode)
+            # The error type and message say what failed (the first live serverless run degraded and,
+            # without this, the log couldn't say why). Request text and tool data are never logged.
+            logger.error(
+                "claude_call_failed_graceful_degradation",
+                mode=resolved_mode,
+                error_type=type(exc).__name__,
+                error=str(exc)[:300],
+            )
             return OrchestratorResult(
                 mode=resolved_mode,
                 answer=AGENT_UNAVAILABLE_ANSWER,
@@ -837,8 +844,16 @@ class OrchestratorAgent:
         if self._approved_by is not None:
             entry["approved_by"] = self._approved_by
         self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.audit_log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry, default=str) + "\n")
+        line = json.dumps(entry, default=str) + "\n"
+        try:
+            with open(self.audit_log_path, "a", encoding="utf-8") as fh:
+                fh.write(line)
+        except OSError:
+            # Unity Catalog volumes (FUSE) don't support append ("Illegal seek",
+            # found on the first serverless job run): rewrite with the line
+            # added. Still only ever adds - existing lines are kept unchanged.
+            existing = self.audit_log_path.read_text(encoding="utf-8") if self.audit_log_path.exists() else ""
+            self.audit_log_path.write_text(existing + line, encoding="utf-8")
 
     @staticmethod
     def _apply_injection_guard(result: ToolResult) -> ToolResult:

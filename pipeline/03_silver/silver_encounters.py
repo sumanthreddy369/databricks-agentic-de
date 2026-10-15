@@ -165,3 +165,25 @@ def silver_patient_identity_conflicts():
         )
         .filter("admissions > 1")
     )
+
+
+@dlt.table(
+    name="silver_patient_duplicate_candidates",
+    comment=(
+        "Data-quality check (problem catalog M2): one person under more than one patient_id - admissions "
+        "sharing a name and birth date across patient_ids. The match key is a hash; no names. Candidates "
+        "only: exact name + birth date can also match two different people, so a data steward decides."
+    ),
+)
+@dlt.expect("one_patient_id_per_person", "patient_ids = 1")
+def silver_patient_duplicate_candidates():
+    return (
+        dlt.read("silver_patient_admissions")
+        .groupBy(F.sha2(F.concat_ws("|", "full_name", "birth_date"), 256).alias("match_key"))
+        .agg(
+            F.countDistinct("patient_id").alias("patient_ids"),
+            F.array_sort(F.collect_set("patient_id")).alias("candidate_patient_ids"),
+            F.count("*").alias("admissions"),
+        )
+        .filter("patient_ids > 1")
+    )

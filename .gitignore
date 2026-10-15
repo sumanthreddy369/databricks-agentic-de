@@ -52,3 +52,5 @@ evals/reports/
 # Demo traffic for the observability stack (scripts/demo_traffic.py)
 data/state/demo/
 data/landing_v2/
+data/landing_v3/
+data/state/healthcheck_live/

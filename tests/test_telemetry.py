@@ -241,3 +241,32 @@ def test_demo_traffic_drives_the_real_guardrails_and_approval_queue(tmp_path, mo
     assert m[("agentic_de_safety_events", (("event", "identifier requests refused"),))] == 2
     assert m[("agentic_de_approvals", (("outcome", "executed"),))] == 1
     assert m[("agentic_de_approvals", (("outcome", "rejected"),))] == 1
+
+
+WORKSPACE = {
+    "measured_at": "2026-10-14T10:00:00Z",
+    "tables": [{"table": "gold.dim_patients", "type": "MATERIALIZED_VIEW", "rows": 1359}],
+    "expectations": [
+        {"dataset": "silver_fct_vitals", "expectation": "plausible_vital_value", "passed": 99352, "failed": 241}
+    ],
+    "masks": {"patients": 1359, "names_masked": 1359, "mrns_masked": 1358},
+    "identity_check": {"patient_ids_admitted_more_than_once": 23, "flagged_two_people_one_id": 23},
+}
+
+
+def test_workspace_snapshot_becomes_pipeline_health_metrics():
+    m = _metrics(telemetry.snapshot([], {}, None, None, now=NOW, workspace=WORKSPACE))
+
+    assert m[("agentic_de_pipeline_table_rows", (("table", "gold.dim_patients"),))] == 1359
+    failed = (("dataset", "silver_fct_vitals"), ("expectation", "plausible_vital_value"), ("result", "failed"))
+    assert m[("agentic_de_pipeline_expectation_records", failed)] == 241
+    # One unmasked MRN must show as less than 100% - the weaker of the two masks counts.
+    assert m[("agentic_de_phi_masked_share", ())] == round(1358 / 1359, 4)
+    assert m[("agentic_de_identity_conflicts_flagged", ())] == 23
+    assert m[("agentic_de_pipeline_snapshot_age_hours", ())] == 2.0
+
+
+def test_newest_workspace_snapshot_is_picked(tmp_path):
+    (tmp_path / "workspace_a.json").write_text(json.dumps({"measured_at": "2026-10-13T00:00:00Z", "tables": [1]}))
+    (tmp_path / "workspace_b.json").write_text(json.dumps({"measured_at": "2026-10-14T00:00:00Z", "tables": [2]}))
+    assert telemetry.newest_workspace_snapshot([tmp_path])["tables"] == [2]

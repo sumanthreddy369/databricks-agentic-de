@@ -1,12 +1,12 @@
 {
-  "measured_at": "2026-10-14T22:15:27Z",
+  "measured_at": "2026-10-14T22:38:36Z",
   "workspace": "free_edition",
-  "note": "Regenerated physiology dataset (103,407 events, 23 injected identity collisions), first run on Databricks Free Edition",
+  "note": "Physiology dataset with both identity defects injected (103,340 events; 16 two-people-one-id, 27 one-person-two-ids), full refresh on Databricks Free Edition",
   "tables": [
     {
       "table": "gold.dim_patients",
       "type": "MATERIALIZED_VIEW",
-      "rows": 1359
+      "rows": 1397
     },
     {
       "table": "gold.dim_providers",
@@ -16,17 +16,17 @@
     {
       "table": "gold.fct_encounter_history",
       "type": "MATERIALIZED_VIEW",
-      "rows": 3814
+      "rows": 3806
     },
     {
       "table": "gold.fct_encounters",
       "type": "MATERIALIZED_VIEW",
-      "rows": 1382
+      "rows": 1413
     },
     {
       "table": "gold.fct_vitals",
       "type": "STREAMING_TABLE",
-      "rows": 99352
+      "rows": 99248
     },
     {
       "table": "gold.gold_live_vitals_by_unit",
@@ -36,7 +36,7 @@
     {
       "table": "silver.bronze_patient_events",
       "type": "STREAMING_TABLE",
-      "rows": 103407
+      "rows": 103340
     },
     {
       "table": "silver.bronze_provider_roster",
@@ -51,12 +51,12 @@
     {
       "table": "silver.event_log_cb164940_713d_4dc2_a929_98b8200fb0e5",
       "type": "MANAGED",
-      "rows": 162
+      "rows": 346
     },
     {
       "table": "silver.raw_patient_events",
       "type": "STREAMING_TABLE",
-      "rows": 103407
+      "rows": 103340
     },
     {
       "table": "silver.raw_provider_roster",
@@ -66,32 +66,37 @@
     {
       "table": "silver.silver_dim_patients",
       "type": "STREAMING_TABLE",
-      "rows": 1359
+      "rows": 1397
     },
     {
       "table": "silver.silver_fct_encounter_history",
       "type": "STREAMING_TABLE",
-      "rows": 3814
+      "rows": 3806
     },
     {
       "table": "silver.silver_fct_encounters",
       "type": "STREAMING_TABLE",
-      "rows": 1382
+      "rows": 1413
     },
     {
       "table": "silver.silver_fct_vitals",
       "type": "STREAMING_TABLE",
-      "rows": 99352
+      "rows": 99248
     },
     {
       "table": "silver.silver_patient_admissions",
       "type": "STREAMING_TABLE",
-      "rows": 1382
+      "rows": 1413
+    },
+    {
+      "table": "silver.silver_patient_duplicate_candidates",
+      "type": "MATERIALIZED_VIEW",
+      "rows": 27
     },
     {
       "table": "silver.silver_patient_identity_conflicts",
       "type": "MATERIALIZED_VIEW",
-      "rows": 23
+      "rows": 16
     },
     {
       "table": "silver.silver_provider_roster",
@@ -103,71 +108,79 @@
     {
       "dataset": "encounters_cdc_view",
       "expectation": "valid_encounter_id",
-      "passed": 7628,
+      "passed": 7612,
       "failed": 0
     },
     {
       "dataset": "encounters_cdc_view",
       "expectation": "valid_patient_id",
-      "passed": 7628,
+      "passed": 7612,
       "failed": 0
     },
     {
       "dataset": "bronze_patient_events",
       "expectation": "has_event_id",
-      "passed": 103407,
+      "passed": 103340,
       "failed": 0
     },
     {
       "dataset": "bronze_patient_events",
       "expectation": "has_event_type",
-      "passed": 103407,
+      "passed": 103340,
       "failed": 0
     },
     {
       "dataset": "silver_fct_vitals",
       "expectation": "known_vital_item",
-      "passed": 99593,
+      "passed": 99534,
       "failed": 0
     },
     {
       "dataset": "silver_fct_vitals",
       "expectation": "plausible_vital_value",
-      "passed": 99352,
-      "failed": 241
+      "passed": 99248,
+      "failed": 286
+    },
+    {
+      "dataset": "silver_patient_duplicate_candidates",
+      "expectation": "one_patient_id_per_person",
+      "passed": 0,
+      "failed": 27
     },
     {
       "dataset": "silver_patient_identity_conflicts",
       "expectation": "one_identity_per_patient_id",
       "passed": 0,
-      "failed": 23
+      "failed": 16
     },
     {
       "dataset": "patients_cdc_view",
       "expectation": "valid_patient_id",
-      "passed": 1382,
+      "passed": 1413,
       "failed": 0
     },
     {
       "dataset": "silver_contract_checked_events",
       "expectation": "has_event_type",
-      "passed": 517035,
+      "passed": 516700,
       "failed": 0
     },
     {
       "dataset": "silver_contract_checked_events",
       "expectation": "known_event_type",
-      "passed": 517035,
+      "passed": 516700,
       "failed": 0
     }
   ],
   "masks": {
-    "patients": 1359,
-    "names_masked": 1359,
-    "mrns_masked": 1359
+    "patients": 1397,
+    "names_masked": 1397,
+    "mrns_masked": 1397
   },
   "identity_check": {
-    "patient_ids_admitted_more_than_once": 23,
-    "flagged_two_people_one_id": 23
+    "patient_ids_admitted_more_than_once": 16,
+    "flagged_two_people_one_id": 16,
+    "duplicate_person_candidate_groups": 27,
+    "duplicate_person_patient_ids_involved": 54
   }
 }

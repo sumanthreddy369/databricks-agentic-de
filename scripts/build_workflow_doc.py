@@ -155,7 +155,7 @@ W5 = [26, 62, 70, 75, 34]
 
 STACK = [
     ["Layer", "Technology", "Version", "What it does here", "Repo path", "Status"],
-    ["Language / tooling", "Python, uv, ruff, pytest", "Python >=3.11; ruff 0.16.8; pytest 9.1.1", "uv-only package management, lint, 429 tests with zero network calls", "pyproject.toml, uv.lock, tests/", "Tested locally - passing in CI"],
+    ["Language / tooling", "Python, uv, ruff, pytest", "Python >=3.11; ruff 0.16.8; pytest 9.1.1", "uv-only package management, lint, 442 tests with zero network calls", "pyproject.toml, uv.lock, tests/", "Tested locally - passing in CI"],
     ["Data source", "Patient-event simulator (Synthea / MIMIC-IV-shaped, synthetic)", "-", "Admit / transfer / discharge + 6 vitals; Kafka publisher or JSON-lines files", "simulator/", "Runs - 103,301 events generated and ingested"],
     ["Transport (free trial)", "Autoloader over a Unity Catalog volume", "-", "Reads JSON-lines files; no extra service", "simulator/file_feed.py, pipeline/01_ingest/", "Runs on Databricks"],
     ["Transport (prod)", "Kafka / Redpanda", "confluent-kafka 2.15.1", "Production event stream; local broker via Docker", "docker-compose.yml, simulator/producer.py", "Tested locally - not run on Databricks"],
@@ -175,7 +175,7 @@ STACK = [
     ["Human approval", "Approvals CLI + earned autonomy", "-", "Named approver, 4h expiry; promotion after 10 clean runs, auto-demotion", "agent/approvals.py, agent/autonomy.py", "Tested locally"],
     ["Observability", "OpenTelemetry SDK + Collector, Prometheus, Jaeger, Grafana", "otel-sdk 1.45.0; collector 0.111.0; Prometheus 2.54.1; Jaeger 1.62.0; Grafana 11.2.2", "Request and tool traces; human-work, guardrail and quality metrics; one dashboard", "agent/otel.py, agent/telemetry.py, observability/", "Runs locally (Docker) - on demo traffic"],
     ["LLM tracing / logs", "Langfuse, structlog", "langfuse 4.15.6, structlog 26.1.0", "LLM-call traces; structured logs", "agent/llm.py", "Tested locally (no-op path)"],
-    ["Orchestration / deploy", "Databricks Asset Bundles + Workflows", "Databricks CLI v1.19.0", "Pipelines and jobs; dev target on the trial", "databricks.yml, resources/", "Runs (dev) - healthcheck job is prod-only"],
+    ["Orchestration / deploy", "Databricks Asset Bundles + Workflows (serverless jobs)", "Databricks CLI v1.19.0", "Pipelines, roster job, health-check job", "databricks.yml, resources/", "Runs (free target) - health-check job runs serverless"],
     ["Evaluation", "Golden question set; scenario evals", "-", "27 live questions, 3 configurations; 14 scripted scenarios", "evals/golden/, evals/", "Measured (golden); scenarios not run on a real model"],
     ["Secrets", "GCP Secret Manager", "google-cloud-secret-manager 2.30.0", "No tokens in files; no-op unless configured", "agent/secrets.py", "Tested locally (no-op path)"],
     ["Infrastructure", "Terraform, Cloud Run (GCP)", "Terraform >=1.5", "GCS bucket, service account, Pub/Sub, Secret Manager", "infra/", "Never run"],
@@ -211,14 +211,14 @@ REPO_MAP = [
     ["observability/", "OTel Collector, Prometheus, Grafana provisioning and dashboard"],
     ["scripts/", "eda_landing, demo_traffic, build_* (Genie space, dashboard, images, docs), stop_everything"],
     ["docs/", "plan, architecture, eda/, comparisons/ (Genie results), images/, this document"],
-    ["tests/", "429 tests, one file per concern, zero network calls"],
+    ["tests/", "442 tests, one file per concern, zero network calls"],
 ]
 
 NEXT = [
     ["#", "Step", "Needs", "Outcome"],
-    ["1", "Pipeline health from the Lakeflow event log into the Grafana dashboard", "-", "Live pipeline panels next to the agent metrics"],
+    ["1", "Health-check incidents to a real channel (email / Slack webhook) instead of the job-failure email", "-", "Escalations reach a person directly"],
     ["2", "Detect patient identity drift in Silver (same patient_id, new name or birth date)", "A pipeline run", "The EDA defect caught by the pipeline"],
-    ["3", "Catalog M2, the other half: the same person under two patient_ids (candidate matching on masked attributes)", "-", "Duplicate patients reported to a steward"],
+    ["3", "Probabilistic identity matching (name variants, transposed dates) beyond exact name + birth date", "-", "Fewer missed duplicates, scored against injected cases"],
     ["4", "Healthcheck job on serverless; live pipeline tools run against the workspace", "Databricks login", "The incident workflow running for real"],
     ["5", "Claude as the router, or a Databricks-hosted model on trial credits", "A paid key, or a check of hosted models", "Free-form requests handled end to end"],
     ["6", "Agent Bricks runbook agent over the problem catalog", "Workspace", "How-to questions answered from the catalog"],
@@ -260,7 +260,7 @@ def story(fx):
                 ["Human approval, earned autonomy, human-work report", "Tested locally - no real week of operation yet"],
                 ["Observability (OTel, Prometheus, Jaeger, Grafana)", "Runs locally on demo traffic through the real orchestrator"],
                 ["Data and deterioration detection", "Measured - EDA done; with realistic physiology, model v2 + NEWS2 + rules catch 66% at 3.8% false alarms (simulated)"],
-                ["Not yet", "Claude with a real model (paid key), healthcheck job on serverless, live pipeline-control tools, Agent Bricks, Terraform"],
+                ["Not yet", "Claude as router (paid key), restart through the live API, Agent Bricks, Terraform, unit row filter with real groups"],
             ],
             [120, 147],
             status_col=1,
@@ -358,11 +358,11 @@ def story(fx):
         [PLAT, OURS, OURS, HUMAN, OURS, HUMAN, PLAT],
         [
             ["Step", "What happens", "Rules", "Code", "Status"],
-            ["Check", "Expectation failures, job states, schema drift", "Read-only", "agent/tools/pipeline_health.py, _live.py", "Tested locally; live tools mock-tested"],
+            ["Check", "Expectation failures, job states, schema drift", "Read-only; each result names its backend", "agent/tools/pipeline_health.py, _live.py", "Runs live on Free Edition (expectations, job status)"],
             ["Match", "Symptom matched to one of 104 catalog problems", "No match = new problem -> escalate", "agent/tools/problem_catalog.py", "Tested locally"],
             ["Escalate", "Contract breaks, data loss, schema drift go to a person", "Never auto-fixed", "notify_and_page", "Tested locally"],
             ["Request fix", "Quarantine / restart become pending requests", "Approval required by default", "agent/orchestrator.py", "Tested locally"],
-            ["Scheduled job", "Healthcheck job with exit codes 0-3", "Non-zero fails the job -> email to a person", "agent/healthcheck.py, resources/workflows.yml", "Not run - prod-only until reworked for serverless"],
+            ["Scheduled job", "Serverless job; rules planner when no model key; exit codes 0-3", "Non-zero fails the run -> email to the owner", "agent/healthcheck.py, agent/rules_planner.py, resources/workflows.yml", "Runs - Free Edition: 3 findings, 2 paged, 1 fix queued for approval"],
         ],
     )
     s += workflow(
@@ -469,7 +469,7 @@ def story(fx):
         [
             ["Change code", "glue or guardrail only"],
             ["ruff check", "lint"],
-            ["pytest", "429 tests, no network,", "no API key"],
+            ["pytest", "442 tests, no network,", "no API key"],
             ["Guardrail tests", "masking, injection, MCP", "when core files change"],
             ["Commit + push", "master"],
             ["GitHub Actions CI", "lint + tests"],

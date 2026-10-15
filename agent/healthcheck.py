@@ -25,9 +25,10 @@ Catalog volume (`PIPELINE_STATE_PATH` / `AUDIT_LOG_PATH` in
 resources/workflows.yml). A missing state file is initialized with
 remediation enabled and no history, which is what a first run needs.
 
-STATUS: the CLI is tested locally with a scripted fake Claude
-(tests/test_healthcheck.py). The scheduled job itself has never run on a
-real workspace.
+Planner: Claude when ANTHROPIC_API_KEY is set, otherwise the deterministic
+rules planner (agent/rules_planner.py) - same tools, guardrails, approval
+gate and audit log, decisions taken from the problem catalog's autonomy
+levels. `--planner` or HEALTHCHECK_PLANNER overrides.
 """
 
 import argparse
@@ -37,7 +38,9 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from agent.databricks_client import load_config
 from agent.orchestrator import AGENT_UNAVAILABLE_ANSWER, DEFAULT_AUDIT_LOG_PATH, OrchestratorAgent
+from agent.rules_planner import RulesPlanner
 
 DEFAULT_STATE_PATH = "data/state/pipeline_state.json"
 
@@ -71,12 +74,37 @@ def run(argv: list[str] | None = None, *, agent: OrchestratorAgent | None = None
     parser = argparse.ArgumentParser(prog="orchestrator_healthcheck", description=__doc__.split("\n\n")[0])
     parser.add_argument("--state-path", default=os.environ.get("PIPELINE_STATE_PATH", DEFAULT_STATE_PATH))
     parser.add_argument("--audit-log-path", default=os.environ.get("AUDIT_LOG_PATH", DEFAULT_AUDIT_LOG_PATH))
+    parser.add_argument(
+        "--planner",
+        choices=["claude", "rules"],
+        default=os.environ.get("HEALTHCHECK_PLANNER")
+        or ("claude" if os.environ.get("ANTHROPIC_API_KEY") else "rules"),
+        help="claude (needs ANTHROPIC_API_KEY) or rules (deterministic, agent/rules_planner.py; the default "
+        "without a key)",
+    )
+    parser.add_argument(
+        "--pipeline-ids",
+        default=None,
+        help='JSON {"name": "pipeline_id"} for the live tools (serverless jobs pass this instead of an env var)',
+    )
     args = parser.parse_args(argv)
+    if args.pipeline_ids:
+        os.environ["DATABRICKS_PIPELINE_IDS"] = args.pipeline_ids
+
+    # Inside a Databricks job the run's own identity is only reachable from
+    # this process; the MCP tool server is a child process without that
+    # runtime context. Resolve it here and pass it on through the environment
+    # the bridge forwards (agent/mcp_bridge.py). Never printed or logged.
+    config = load_config()
+    if config is not None and not os.environ.get("DATABRICKS_TOKEN"):
+        os.environ["DATABRICKS_HOST"] = config.host
+        os.environ["DATABRICKS_TOKEN"] = config.token
 
     state_path = Path(args.state_path)
     _ensure_state_file(state_path)
     if agent is None:
-        agent = OrchestratorAgent(state_path=state_path, audit_log_path=args.audit_log_path)
+        planner = RulesPlanner() if args.planner == "rules" else None
+        agent = OrchestratorAgent(claude=planner, state_path=state_path, audit_log_path=args.audit_log_path)
 
     result = agent.handle(HEALTHCHECK_REQUEST, mode="de")
     print(json.dumps(asdict(result)))

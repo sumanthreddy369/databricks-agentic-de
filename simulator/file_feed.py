@@ -100,6 +100,9 @@ def run(
     identity_collision_rate: float = typer.Option(
         0.0, help="Share of admissions that are a different person reusing an issued patient_id (catalog M2)."
     ),
+    duplicate_person_rate: float = typer.Option(
+        0.0, help="Share of admissions that are a returning person under a new patient_id and MRN (catalog M2)."
+    ),
 ) -> None:
     if seed >= 0:
         random.seed(seed)
@@ -107,6 +110,7 @@ def run(
         target_size=patients,
         rng=random.Random(seed) if seed >= 0 else None,
         identity_collision_rate=identity_collision_rate,
+        duplicate_person_rate=duplicate_person_rate,
     )
     files = generate_files(
         Path(output_dir),
@@ -122,6 +126,8 @@ def run(
         console.print(
             f"Injected {population.identity_collisions} identity collisions (two people, one patient_id)"
         )
+    if population.duplicate_people:
+        console.print(f"Injected {population.duplicate_people} duplicate people (one person, two patient_ids)")
 
 
 if __name__ == "__main__":

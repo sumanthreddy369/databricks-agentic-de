@@ -286,3 +286,13 @@ def test_patient_identity_conflicts_are_flagged_not_dropped(pipelines):
     assert check.expectations == {"one_identity_per_patient_id": "warn"}
     assert check.reads == ["silver_patient_admissions"]
     assert graph.datasets["silver_patient_admissions"].reads == ["silver_contract_checked_events"]
+
+
+def test_duplicate_people_are_flagged_from_the_same_admissions(pipelines):
+    """Catalog M2, the other half: one person under two patient_ids. Warn-only
+    candidates for a steward (an exact name + birth date match can be two
+    different people), built downstream of the contract gate."""
+    graph = pipelines["streaming_patient_pipeline"]
+    check = graph.datasets["silver_patient_duplicate_candidates"]
+    assert check.expectations == {"one_patient_id_per_person": "warn"}
+    assert check.reads == ["silver_patient_admissions"]

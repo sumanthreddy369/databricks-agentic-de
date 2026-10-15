@@ -13,7 +13,7 @@ resources:
           pipeline_task:
             pipeline_id: ${resources.pipelines.reference_data_pipeline.id}
 
-# The agent healthcheck job is defined for the prod target only, for now.
+# The agent healthcheck job: serverless on `free` (below); classic-cluster on prod.
 # The trial workspace is serverless-only ("Only serverless compute is
 # supported in the workspace" on deploy), and this job still uses a classic
 # job cluster plus secrets injected as cluster environment variables, which
@@ -22,6 +22,45 @@ resources:
 # parameters; until then dev deploys without it. It also can't run without
 # an Anthropic API key in the secret scope.
 targets:
+  # Serverless version for Databricks Free Edition: no cluster, no secrets.
+  # The run authenticates as itself (agent/databricks_client.py
+  # _runtime_credentials), and without an Anthropic key the deterministic
+  # rules planner decides (agent/rules_planner.py). State and audit log live
+  # in the ops volume so they survive between runs. Development mode deploys
+  # the schedule paused.
+  free:
+    resources:
+      jobs:
+        agent_pipeline_healthcheck:
+          name: agent_pipeline_healthcheck
+          schedule:
+            quartz_cron_expression: "0 */15 * * * ?" # every 15 minutes
+            timezone_id: UTC
+          email_notifications:
+            on_failure:
+              - ${workspace.current_user.userName}
+          environments:
+            - environment_key: agent_env
+              spec:
+                client: "2"
+                dependencies:
+                  - ../dist/*.whl
+          tasks:
+            - task_key: run_de_healthcheck
+              environment_key: agent_env
+              python_wheel_task:
+                package_name: databricks_agentic_de
+                entry_point: orchestrator_healthcheck
+                parameters:
+                  - --planner
+                  - rules
+                  - --pipeline-ids
+                  - '{"streaming_patient_pipeline": "${resources.pipelines.streaming_patient_pipeline.id}"}'
+                  - --state-path
+                  - /Volumes/healthcare_agentic_de/ops/agent_state/pipeline_state.json
+                  - --audit-log-path
+                  - /Volumes/healthcare_agentic_de/ops/agent_state/audit_log.jsonl
+
   prod:
     resources:
       jobs:

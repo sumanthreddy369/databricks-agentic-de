@@ -75,6 +75,25 @@ class DatabricksConfig:
     genie_space_id: str | None = None
 
 
+def _runtime_credentials() -> tuple[str, str] | None:
+    """Inside a Databricks job or notebook (DATABRICKS_RUNTIME_VERSION set),
+    use the run's own identity via the Databricks SDK - no token to create or
+    store. Outside Databricks, or if the SDK can't authenticate, None."""
+    if not os.environ.get("DATABRICKS_RUNTIME_VERSION"):
+        return None
+    try:
+        from databricks.sdk.core import Config
+
+        config = Config()
+        header = config.authenticate().get("Authorization", "")
+    except Exception:  # noqa: BLE001 - any auth failure means "not configured", never a crash
+        logger.warning("databricks_runtime_auth_unavailable")
+        return None
+    if not (config.host and header.startswith("Bearer ")):
+        return None
+    return config.host, header.removeprefix("Bearer ")
+
+
 def load_config() -> DatabricksConfig | None:
     """Returns the live-workspace config, or `None` if it isn't configured.
 
@@ -84,11 +103,12 @@ def load_config() -> DatabricksConfig | None:
     `GENIE_SPACE_ID` (the Genie space DA-mode questions are routed to).
     """
     host = os.environ.get("DATABRICKS_HOST")
-    if not host:
-        return None
-    token = get_secret("DATABRICKS_TOKEN")
-    if not token:
-        return None
+    token = get_secret("DATABRICKS_TOKEN") if host else None
+    if not (host and token):
+        runtime = _runtime_credentials()
+        if runtime is None:
+            return None
+        host, token = runtime
 
     pipeline_ids: dict[str, str] = {}
     raw_ids = os.environ.get("DATABRICKS_PIPELINE_IDS", "")

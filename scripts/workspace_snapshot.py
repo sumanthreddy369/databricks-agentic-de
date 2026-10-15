@@ -8,7 +8,7 @@ DATABRICKS_WAREHOUSE_ID. Writes docs/comparisons/results/workspace_<label>_<date
 - row counts of every table the pipelines published (bronze/silver/gold);
 - every expectation's passed / failed records, from the pipeline's event log;
 - the Unity Catalog mask check (names and MRNs redacted in Gold);
-- the patient identity check (problem catalog M2).
+- the patient identity checks (problem catalog M2): two people on one id, one person on two ids.
 
 Counts and flags only - never patient values.
 """
@@ -45,7 +45,10 @@ def snapshot(client: DatabricksClient, pipeline_id: str) -> dict:
         "sum(e.failed_records) AS failed FROM (SELECT explode(from_json("
         "details:flow_progress.data_quality.expectations, "
         "'array<struct<name:string,dataset:string,passed_records:bigint,failed_records:bigint>>')) AS e "
-        f"FROM event_log('{pipeline_id}') WHERE event_type = 'flow_progress') "
+        f"FROM event_log('{pipeline_id}') WHERE event_type = 'flow_progress' "
+        # Only the latest update: the event log keeps every run, and summing them double-counts.
+        f"AND origin.update_id = (SELECT origin.update_id FROM event_log('{pipeline_id}') "
+        "WHERE event_type = 'create_update' ORDER BY timestamp DESC LIMIT 1)) "
         "GROUP BY 1, 2 ORDER BY 1, 2 LIMIT 200"
     )
     masks = client.execute_statement(
@@ -57,6 +60,12 @@ def snapshot(client: DatabricksClient, pipeline_id: str) -> dict:
         f"count_if(names > 1 OR birth_dates > 1) AS flagged_two_people_one_id "
         f"FROM {CATALOG}.silver.silver_patient_identity_conflicts LIMIT 1"
     )[0]
+    duplicates = client.execute_statement(
+        f"SELECT count(*) AS candidate_groups, coalesce(sum(patient_ids), 0) AS patient_ids_involved "
+        f"FROM {CATALOG}.silver.silver_patient_duplicate_candidates LIMIT 1"
+    )[0]
+    identity["duplicate_person_candidate_groups"] = duplicates["candidate_groups"]
+    identity["duplicate_person_patient_ids_involved"] = duplicates["patient_ids_involved"]
     return {
         "tables": counts,
         "expectations": [

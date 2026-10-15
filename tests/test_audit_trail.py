@@ -7,6 +7,7 @@ appears in any audit line — only the already-masked output does.
 import json
 from pathlib import Path
 
+from agent.llm import ToolResult
 from agent.orchestrator import OrchestratorAgent
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -97,3 +98,30 @@ def test_audit_log_is_only_ever_appended_to_at_the_filesystem_level(tmp_path):
     size_after_2 = audit_log_path.stat().st_size
 
     assert size_after_2 > size_after_1  # strictly grew, never shrank/rewrote
+
+
+def test_audit_log_works_where_append_is_unsupported(tmp_path, monkeypatch):
+    """Unity Catalog volumes (FUSE) reject append mode with "Illegal seek" -
+    the first serverless health-check run degraded on exactly this. The log
+    must still grow, keeping every earlier line."""
+    import builtins
+    import errno
+
+    audit = tmp_path / "audit.jsonl"
+    audit.write_text('{"earlier": true}\n', encoding="utf-8")
+    real_open = builtins.open
+
+    def no_append(file, mode="r", *args, **kwargs):
+        if "a" in mode:
+            raise OSError(errno.ESPIPE, "Illegal seek")
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", no_append)
+    orchestrator = OrchestratorAgent(
+        claude=_NoopClaude(), state_path=tmp_path / "state.json", audit_log_path=audit
+    )
+    orchestrator._append_audit_log("check_job_status", {}, ToolResult(tool_use_id="", content="{}"))
+
+    lines = audit.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == '{"earlier": true}'
+    assert len(lines) == 2 and '"check_job_status"' in lines[1]

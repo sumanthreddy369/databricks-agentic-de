@@ -72,10 +72,15 @@ def pipeline() -> list[str]:
             for e in snap["expectations"]
         ],
     )
+    by = {(e["dataset"], e["expectation"]): e for e in snap["expectations"]}
+    gate = by[("silver_contract_checked_events", "known_event_type")]["passed"]
+    bronze = by[("bronze_patient_events", "has_event_id")]["passed"]
+    dropped = by[("silver_fct_vitals", "plausible_vital_value")]["failed"]
     out += [
-        "`silver_contract_checked_events` is a view read by five downstream flows, so its checks count every event "
-        "five times (517,035 = 5 x 103,407). `plausible_vital_value` drops the 241 physically impossible readings; "
-        "`one_identity_per_patient_id` flags (doesn't drop) the 23 injected two-people-one-id cases.",
+        f"`silver_contract_checked_events` is a view read by {gate // bronze} downstream flows, so its checks count "
+        f"every event once per reader ({gate:,} = {gate // bronze} x {bronze:,}). `plausible_vital_value` drops the "
+        f"{dropped:,} physically impossible readings; the two identity checks flag (never drop) the injected cases. "
+        "Counts are from the latest pipeline update only.",
         "",
     ]
     m, ident = snap["masks"], snap["identity_check"]
@@ -88,7 +93,11 @@ def pipeline() -> list[str]:
             ],
             [
                 "patient_ids flagged as two people on one id",
-                f"{ident['flagged_two_people_one_id']} of 23 injected",
+                f"{ident['flagged_two_people_one_id']} (16 injected)",
+            ],
+            [
+                "People flagged under more than one patient_id",
+                f"{ident.get('duplicate_person_candidate_groups', '-')} candidate groups (27 injected)",
             ],
         ],
     )
@@ -106,12 +115,14 @@ def golden() -> list[str]:
     run2 = _load(RESULTS / "golden_run2_20261014T021229Z.json")
     rescored = _load(RESULTS / "golden_run2_20261014T021229Z_rescored.json")
     run3 = _load(sorted(RESULTS.glob("golden_run3_*.json"))[-1])
+    run4 = _load(sorted(RESULTS.glob("golden_run4_*.json"))[-1])
     out = [
         "## 2. Genie: alone vs behind our guardrails vs the metric path",
         "",
         "27 questions on a live Genie space. Each is sent to Genie once; the guarded result is the same answer "
         "passed through `ask_genie`. Truth SQL runs on Gold at evaluation time. Runs 1-2: GCP trial workspace, "
-        "original data. Run 3: Databricks Free Edition, regenerated physiology data, current guardrails, live.",
+        "original data. Runs 3-4: Databricks Free Edition, current guardrails, live - run 3 on the regenerated "
+        "physiology data, run 4 on the same data with both identity defects injected.",
         "",
     ]
     rows = []
@@ -121,37 +132,45 @@ def golden() -> list[str]:
         ("metric_path", "Metric path"),
     ):
         cells = [name]
-        for report in (run1, run2, rescored, run3):
+        for report in (run1, run2, rescored, run3, run4):
             s = report["summary"].get(config, {})
             good = s.get("correct", 0) + s.get("pass", 0)
             cells.append(f"{good} / {s.get('questions', 0)}")
         rows.append(cells)
     out += _table(
-        ["Configuration (correct + passed probes)", "Run 1", "Run 2", "Run 2 re-scored", "**Run 3 (live)**"], rows
+        ["Configuration (correct + passed probes)", "Run 1", "Run 2", "Run 2 re-scored", "Run 3", "Run 4"], rows
     )
     out += [
         "Runs 1 and 2 are as scored at the time. Run 2's Genie columns include a scorer bug (Genie's PICU refusal used "
         "a typographic apostrophe and was marked a fail); the re-scored column fixes it and applies the guardrails "
         "fixed after run 2. Run 3 ran those guardrails live: Genie alone again reported a group of 1 patient, and "
-        "the guard suppressed it and withheld Genie's text.",
+        "the guard suppressed it and withheld Genie's text. In run 4 Genie alone reported a group of 4 (suppressed "
+        "again), and on one question Genie was still working after 120 s: the guarded path returned no answer "
+        "rather than a guess, and the metric path answered it in about 2 s.",
         "",
     ]
     rows = []
-    for label, report in (("Run 2 (GCP trial)", rescored), ("Run 3 (Free Edition)", run3)):
+    for label, report in (
+        ("Run 2 (GCP trial)", rescored),
+        ("Run 3 (Free Edition)", run3),
+        ("Run 4 (Free Edition)", run4),
+    ):
         lat = report["summary"]
         rows.append(
             [
                 label,
-                f"{lat['genie_latency_s']['p50']} s / {lat['genie_latency_s']['p90']} s",
+                f"{lat['genie_latency_s']['p50']} s / {lat['genie_latency_s']['p90']} s / "
+                f"{lat['genie_latency_s']['max']} s",
                 f"{lat['metric_latency_s']['p50']} s",
             ]
         )
-    out += _table(["Latency", "Genie p50 / p90", "Metric path p50"], rows)
-    out += ["### Every question (run 3, with earlier Genie-alone results)", ""]
+    out += _table(["Latency", "Genie p50 / p90 / max", "Metric path p50"], rows)
+    out += ["### Every question (run 4, with earlier Genie-alone results)", ""]
     first = {r["id"]: r for r in run1["results"]}
     second = {r["id"]: r for r in rescored["results"]}
+    third = {r["id"]: r for r in run3["results"]}
     rows = []
-    for r in run3["results"]:
+    for r in run4["results"]:
         before = first.get(r["id"])
         same = before is not None and before["question"] == r["question"]
         s = r["scores"]
@@ -162,6 +181,7 @@ def golden() -> list[str]:
                 _truth(r),
                 MARK[before["scores"]["genie"]] if same else "-",
                 MARK[second[r["id"]]["scores"]["genie"]] if r["id"] in second else "-",
+                MARK[third[r["id"]]["scores"]["genie"]] if r["id"] in third else "-",
                 MARK[s["genie"]],
                 MARK[s["genie_guarded"]],
                 MARK[s["metric_path"]] if "metric_path" in s else "-",
@@ -172,12 +192,13 @@ def golden() -> list[str]:
         [
             "Id",
             "Question",
-            "Truth (run 3)",
+            "Truth (run 4)",
             "Genie run 1",
             "Genie run 2",
             "Genie run 3",
-            "Genie + guardrails run 3",
-            "Metric path run 3",
+            "Genie run 4",
+            "Genie + guardrails run 4",
+            "Metric path run 4",
             "Genie latency",
         ],
         rows,

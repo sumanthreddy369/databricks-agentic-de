@@ -278,18 +278,26 @@ def pipeline_lineage(snapshot_path: Path):
             rows.get("silver_patient_identity_conflicts"),
             [check("silver_patient_identity_conflicts", "one_identity_per_patient_id", "warn")],
         ),
-        (0, 3.4, "raw_provider_roster", rows.get("raw_provider_roster"), []),
-        (1, 3.4, "bronze_provider_roster", rows.get("bronze_provider_roster"), []),
-        (3, 3.4, "silver_provider_roster", rows.get("silver_provider_roster"), []),
-        (4, 3.4, "gold.dim_providers", rows.get("dim_providers"), []),
+        (
+            4,
+            3,
+            "silver_patient_duplicate_candidates",
+            rows.get("silver_patient_duplicate_candidates"),
+            [check("silver_patient_duplicate_candidates", "one_patient_id_per_person", "warn")],
+        ),
+        (0, 4.4, "raw_provider_roster", rows.get("raw_provider_roster"), []),
+        (1, 4.4, "bronze_provider_roster", rows.get("bronze_provider_roster"), []),
+        (3, 4.4, "silver_provider_roster", rows.get("silver_provider_roster"), []),
+        (4, 4.4, "gold.dim_providers", rows.get("dim_providers"), []),
     ]
     edges = [((0, 0), (1, 0)), ((1, 0), (2, 0))]
     edges += [((2, 0), (3, y)) for y in (-2, -1, 0, 1, 2)]
     edges += [((3, y), (4, y)) for y in (-2, -1, 0, 1, 2)]
-    edges += [((0, 3.4), (1, 3.4)), ((1, 3.4), (3, 3.4)), ((3, 3.4), (4, 3.4))]
+    edges += [((3, 2), (4, 3))]
+    edges += [((0, 4.4), (1, 4.4)), ((1, 4.4), (3, 4.4)), ((3, 4.4), (4, 4.4))]
 
-    fig, ax = plt.subplots(figsize=(14, 7.2))
-    w, h, xgap = 2.25, 0.78, 2.75
+    fig, ax = plt.subplots(figsize=(14, 8.2))
+    w, h, xgap = 2.45, 0.78, 2.8
     pos = {}
     for col, row, title, value, checks in boxes:
         x, y = col * xgap, -row
@@ -323,7 +331,7 @@ def pipeline_lineage(snapshot_path: Path):
     for col, label in enumerate(["Ingest (Autoloader)", "Bronze", "Contract gate", "Silver", "Gold / checks"]):
         ax.text(col * xgap, 2.75, label, ha="center", fontsize=9.5, color=INK_2)
     ax.set_xlim(-w / 2 - 0.2, 4 * xgap + w / 2 + 0.2)
-    ax.set_ylim(-3.95, 3.0)
+    ax.set_ylim(-4.95, 3.0)
     ax.axis("off")
     fig.suptitle(
         "The pipeline as it ran on Databricks Free Edition - rows per table, expectations from the event log",
