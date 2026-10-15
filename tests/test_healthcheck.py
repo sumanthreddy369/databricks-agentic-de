@@ -133,3 +133,19 @@ def test_entry_point_named_by_the_job_is_declared_in_the_wheel():
     env = job["job_clusters"][0]["new_cluster"]["spark_env_vars"]
     assert env["PIPELINE_STATE_PATH"].startswith("/Volumes/")
     assert env["AUDIT_LOG_PATH"].startswith("/Volumes/")
+
+
+def test_a_healthy_run_returns_without_system_exit(monkeypatch):
+    """Serverless wheel tasks run under IPython, which reports even
+    SystemExit(0) as a failure - main() must only exit for non-zero codes."""
+    monkeypatch.setattr(healthcheck, "run", lambda argv: healthcheck.EXIT_OK)
+    healthcheck.main()  # no SystemExit raised
+
+
+def test_a_problem_still_exits_non_zero(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(healthcheck, "run", lambda argv: healthcheck.EXIT_ESCALATED)
+    with pytest.raises(SystemExit) as exited:
+        healthcheck.main()
+    assert exited.value.code == healthcheck.EXIT_ESCALATED

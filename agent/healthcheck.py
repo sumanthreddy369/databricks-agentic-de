@@ -87,9 +87,18 @@ def run(argv: list[str] | None = None, *, agent: OrchestratorAgent | None = None
         default=None,
         help='JSON {"name": "pipeline_id"} for the live tools (serverless jobs pass this instead of an env var)',
     )
+    parser.add_argument(
+        "--alert-webhook-secret",
+        default=None,
+        help="Databricks secret scope/key holding the alert webhook URL (read with the run's own identity)",
+    )
     args = parser.parse_args(argv)
     if args.pipeline_ids:
         os.environ["DATABRICKS_PIPELINE_IDS"] = args.pipeline_ids
+    if args.alert_webhook_secret and not os.environ.get("ALERT_WEBHOOK_URL"):
+        url = _read_databricks_secret(args.alert_webhook_secret)
+        if url:
+            os.environ["ALERT_WEBHOOK_URL"] = url  # forwarded to the tool server; never printed
 
     # Inside a Databricks job the run's own identity is only reachable from
     # this process; the MCP tool server is a child process without that
@@ -106,22 +115,59 @@ def run(argv: list[str] | None = None, *, agent: OrchestratorAgent | None = None
         planner = RulesPlanner() if args.planner == "rules" else None
         agent = OrchestratorAgent(claude=planner, state_path=state_path, audit_log_path=args.audit_log_path)
 
+    before = _read_state(state_path)
+    known_incidents = len(before.get("incidents", []))
+    known_approvals = {a["id"] for a in before.get("pending_approvals", []) if a.get("status") == "pending"}
+
     result = agent.handle(HEALTHCHECK_REQUEST, mode="de")
     print(json.dumps(asdict(result)))
 
     if result.answer == AGENT_UNAVAILABLE_ANSWER:
         return EXIT_AGENT_UNAVAILABLE
-    if "notify_and_page" in result.tool_calls:
+    # A failed run is an alert (the job emails its owner), so fail only for
+    # something new. On a 15-minute schedule an unresolved, already-reported
+    # problem would otherwise email every run until someone fixes it.
+    # Stay quiet only when the state positively shows every incident raised
+    # this run was a repeat; anything unclear fails loud.
+    added = _read_state(state_path).get("incidents", [])[known_incidents:]
+    all_repeats = bool(added) and all((i.get("alert") or {}).get("new") is False for i in added)
+    if "notify_and_page" in result.tool_calls and not all_repeats:
         return EXIT_ESCALATED
-    if result.pending_approvals:
+    if set(result.pending_approvals) - known_approvals:
         return EXIT_APPROVAL_PENDING
+    if "notify_and_page" in result.tool_calls or result.pending_approvals:
+        print(json.dumps({"note": "known problems only: already alerted / already waiting for approval"}))
     return EXIT_OK
+
+
+def _read_databricks_secret(scope_key: str) -> str | None:
+    """scope/key from Databricks secrets, or None (missing secret, not on
+    Databricks): alerts then fall back to the job's failure email."""
+    scope, _, key = scope_key.partition("/")
+    try:
+        from databricks.sdk import WorkspaceClient
+
+        return WorkspaceClient().dbutils.secrets.get(scope=scope, key=key) or None
+    except Exception:  # noqa: BLE001 - a missing alert channel must never stop the health check
+        print(json.dumps({"note": f"alert webhook secret {scope_key} not available; no webhook alerts"}))
+        return None
+
+
+def _read_state(state_path: Path) -> dict:
+    try:
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
 
 def main() -> None:
     # Console-script and python_wheel_task entry point. sys.exit (rather
-    # than returning the code) is what makes a non-zero code fail the task.
-    sys.exit(run(sys.argv[1:]))
+    # than returning the code) is what makes a non-zero code fail the task -
+    # but only for non-zero: serverless wheel tasks run under IPython, which
+    # reports even SystemExit(0) as a failed run (seen on Free Edition).
+    code = run(sys.argv[1:])
+    if code:
+        sys.exit(code)
 
 
 if __name__ == "__main__":

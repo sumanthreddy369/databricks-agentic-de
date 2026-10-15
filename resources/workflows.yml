@@ -60,6 +60,12 @@ targets:
                   - /Volumes/healthcare_agentic_de/ops/agent_state/pipeline_state.json
                   - --audit-log-path
                   - /Volumes/healthcare_agentic_de/ops/agent_state/audit_log.jsonl
+                  # Optional: alert a chat channel. The account owner creates it once:
+                  #   databricks secrets create-scope healthcare_agentic_de
+                  #   databricks secrets put-secret healthcare_agentic_de alert_webhook_url
+                  # Without it, the run's failure email is the alert.
+                  - --alert-webhook-secret
+                  - healthcare_agentic_de/alert_webhook_url
 
   prod:
     resources:

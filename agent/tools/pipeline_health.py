@@ -39,11 +39,12 @@ do).
 
 import functools
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from agent.llm import ToolResult
 from agent.otel import get_tracer
-from agent.tools import pipeline_health_live
+from agent.tools import alerting, pipeline_health_live
 from common.contracts import PATIENT_EVENT_ENVELOPE_FIELDS
 
 
@@ -185,13 +186,18 @@ def restart_pipeline(state_path: Path, pipeline_name: str) -> ToolResult:
 
 
 @_traced_tool("notify_and_page")
-def notify_and_page(state_path: Path, message: str) -> ToolResult:
-    """Real equivalent: an incident-management/paging integration (e.g.
-    PagerDuty Events API, Slack webhook). This is the escalation-only tool —
-    used when a check fails and no remediation tool applies, most notably a
-    hard-stop expectation failure like `known_event_type`."""
+def notify_and_page(state_path: Path, message: str, fingerprint: str | None = None) -> ToolResult:
+    """The escalation-only tool - used when a check fails and no remediation
+    tool applies, most notably a hard-stop expectation failure like
+    `known_event_type`. Records the incident and alerts a person through
+    agent/tools/alerting.py (webhook if configured; once per problem per
+    ALERT_REPEAT_HOURS). `fingerprint` names the problem independent of its
+    counts; by default the message itself."""
     state = _load(state_path)
+    alert = alerting.send_alert(state, message, fingerprint=fingerprint)
     incidents = state.setdefault("incidents", [])
-    incidents.append({"message": message})
+    incidents.append({"message": message, "at": datetime.now(UTC).isoformat(), "alert": alert})
     _save(state_path, state)
-    return ToolResult(tool_use_id="", content=json.dumps({"ok": True, "paged": True, "message": message}))
+    # "paged" = an escalation was raised (recorded); "alert" says whether, and how, a person was told.
+    payload = {"ok": True, "paged": True, "new_incident": alert["new"], "alert": alert, "message": message}
+    return ToolResult(tool_use_id="", content=json.dumps(payload))

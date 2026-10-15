@@ -88,10 +88,10 @@ def restart_pipeline(state_path: str, pipeline_name: str):
 
 
 @mcp_app.tool()
-def notify_and_page(state_path: str, message: str):
-    """Escalate to a human on-call engineer; appends an incident to the given
-    pipeline-state JSON file."""
-    return _to_call_tool_result(pipeline_health.notify_and_page(state_path, message))
+def notify_and_page(state_path: str, message: str, fingerprint: str | None = None):
+    """Escalate to a human on-call engineer: records an incident in the given
+    pipeline-state JSON file and alerts once per problem (`fingerprint`)."""
+    return _to_call_tool_result(pipeline_health.notify_and_page(state_path, message, fingerprint))
 
 
 @mcp_app.tool()

@@ -22,6 +22,8 @@ than the catalog allows, so they are the safe floor.
 
 import json
 
+from agent.tools import alerting
+
 
 def _load(result) -> dict:
     try:
@@ -64,7 +66,7 @@ class RulesPlanner:
                 }
             )
 
-        page, requested, observed = [], [], []
+        page, requested, observed, keys = [], [], [], []
         for f in findings:
             match = (_load(dispatch("lookup_problem", {"query": f["what"]})).get("matches") or [None])[0]
             level = (match or {}).get("autonomy_level", "")
@@ -79,9 +81,16 @@ class RulesPlanner:
                 requested.append(label)
             else:
                 page.append(label)
+                keys.append(f"{f['what']}|{(match or {}).get('id', 'new')}")
 
         if page:
-            dispatch("notify_and_page", {"message": "Health check needs a person: " + "; ".join(page)})
+            # Same problems -> same fingerprint, whatever their counts, so an
+            # unresolved problem alerts once, not every 15 minutes.
+            fingerprint = alerting.fingerprint_of("|".join(sorted(keys)))
+            dispatch(
+                "notify_and_page",
+                {"message": "Health check needs a person: " + "; ".join(page), "fingerprint": fingerprint},
+            )
 
         if not findings:
             return "Healthy: no failing expectations, all pipelines healthy."
