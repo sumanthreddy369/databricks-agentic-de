@@ -292,18 +292,25 @@ def pipeline_lineage(snapshot_path: Path):
             rows.get("silver_patient_fuzzy_duplicate_candidates"),
             [check("silver_patient_fuzzy_duplicate_candidates", "no_near_duplicate_registration", "warn")],
         ),
-        (0, 5.4, "raw_provider_roster", rows.get("raw_provider_roster"), []),
-        (1, 5.4, "bronze_provider_roster", rows.get("bronze_provider_roster"), []),
-        (3, 5.4, "silver_provider_roster", rows.get("silver_provider_roster"), []),
-        (4, 5.4, "gold.dim_providers", rows.get("dim_providers"), []),
+        (
+            4,
+            5,
+            "silver_patient_name_change_candidates",
+            rows.get("silver_patient_name_change_candidates"),
+            [check("silver_patient_name_change_candidates", "no_name_change_registration", "warn")],
+        ),
+        (0, 6.4, "raw_provider_roster", rows.get("raw_provider_roster"), []),
+        (1, 6.4, "bronze_provider_roster", rows.get("bronze_provider_roster"), []),
+        (3, 6.4, "silver_provider_roster", rows.get("silver_provider_roster"), []),
+        (4, 6.4, "gold.dim_providers", rows.get("dim_providers"), []),
     ]
     edges = [((0, 0), (1, 0)), ((1, 0), (2, 0))]
     edges += [((2, 0), (3, y)) for y in (-2, -1, 0, 1, 2)]
     edges += [((3, y), (4, y)) for y in (-2, -1, 0, 1, 2)]
-    edges += [((3, 2), (4, 3)), ((3, 2), (4, 4))]
-    edges += [((0, 5.4), (1, 5.4)), ((1, 5.4), (3, 5.4)), ((3, 5.4), (4, 5.4))]
+    edges += [((3, 2), (4, 3)), ((3, 2), (4, 4)), ((3, 2), (4, 5))]
+    edges += [((0, 6.4), (1, 6.4)), ((1, 6.4), (3, 6.4)), ((3, 6.4), (4, 6.4))]
 
-    fig, ax = plt.subplots(figsize=(14, 9.2))
+    fig, ax = plt.subplots(figsize=(14, 10.2))
     w, h, xgap = 2.7, 0.78, 2.95
     pos = {}
     for col, row, title, value, checks in boxes:
@@ -321,7 +328,8 @@ def pipeline_lineage(snapshot_path: Path):
                 zorder=2,
             )
         )
-        ax.text(x, y + 0.2, title, ha="center", va="center", fontsize=8.6, color=INK, fontweight="bold", zorder=3)
+        size = 8.6 if len(title) <= 34 else 7.4  # the longest check-table names
+        ax.text(x, y + 0.2, title, ha="center", va="center", fontsize=size, color=INK, fontweight="bold", zorder=3)
         detail = f"{value:,} rows" if isinstance(value, int) else (value or "")
         ax.text(x, y - 0.02, detail, ha="center", va="center", fontsize=8.4, color=INK_2, zorder=3)
         for i, c in enumerate(c for c in checks if c):
@@ -338,7 +346,7 @@ def pipeline_lineage(snapshot_path: Path):
     for col, label in enumerate(["Ingest (Autoloader)", "Bronze", "Contract gate", "Silver", "Gold / checks"]):
         ax.text(col * xgap, 2.75, label, ha="center", fontsize=9.5, color=INK_2)
     ax.set_xlim(-w / 2 - 0.2, 4 * xgap + w / 2 + 0.2)
-    ax.set_ylim(-5.95, 3.0)
+    ax.set_ylim(-6.95, 3.0)
     ax.axis("off")
     fig.suptitle(
         "The pipeline as it ran on Databricks Free Edition - rows per table, expectations from the event log",

@@ -17,7 +17,9 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 from common.contracts import VITAL_ITEM_TYPES
+from common.identity import NICKNAMES
 from simulator.domain import (
+    _LAST_NAMES,
     EncounterInfo,
     PatientEvent,
     PatientSnapshot,
@@ -69,6 +71,15 @@ def _vary(patient: PatientSnapshot, rng) -> PatientSnapshot:
     return replace(patient, full_name="".join(name))
 
 
+def _rename(patient: PatientSnapshot, rng) -> PatientSnapshot:
+    """A name that changed outright, beyond a typo: registered under a
+    nickname, or under a new surname (marriage). Birth date and gender stay."""
+    first, last = patient.full_name.split(" ", 1)
+    if rng.random() < 0.5:
+        return replace(patient, full_name=f"{rng.choice(NICKNAMES[first.lower()]).title()} {last}")
+    return replace(patient, full_name=f"{first} {rng.choice([n for n in _LAST_NAMES if n != last])}")
+
+
 class Population:
     def __init__(
         self,
@@ -77,6 +88,7 @@ class Population:
         identity_collision_rate: float = 0.0,
         duplicate_person_rate: float = 0.0,
         duplicate_variant_rate: float = 0.0,
+        duplicate_rename_rate: float = 0.0,
     ) -> None:
         """The two real-world identity defects (problem catalog M2), injected
         on purpose so the Silver checks can be measured; both 0 by default:
@@ -86,7 +98,9 @@ class Population:
           registered under a new patient_id and MRN (one person, two ids);
         - `duplicate_variant_rate`: share of those duplicates registered with a
           small difference - a one-letter typo or transposition in the name,
-          or day and month swapped - the cases exact matching misses.
+          or day and month swapped - the cases exact matching misses;
+        - `duplicate_rename_rate`: share of the remaining duplicates registered
+          under a nickname or a new surname - the cases edit distance misses.
         Every injected case is listed in `injected_identity` (ground truth for
         scoring the Silver checks; never part of the event stream)."""
         self.target_size = target_size
@@ -99,6 +113,7 @@ class Population:
         self.issued_people: list[PatientSnapshot] = []
         self.duplicate_people = 0
         self.duplicate_variant_rate = duplicate_variant_rate
+        self.duplicate_rename_rate = duplicate_rename_rate
         self.injected_identity: list[dict] = []
 
     def admit_new_patients(self, count: int, now: datetime) -> list[PatientEvent]:
@@ -120,6 +135,9 @@ class Population:
                 kind = "one_person_two_ids"
                 if self._rng.random() < self.duplicate_variant_rate:
                     patient, kind = _vary(patient, self._rng), "one_person_two_ids_variant"
+                # Only draws when enabled, so feeds generated without it are unchanged.
+                elif self.duplicate_rename_rate and self._rng.random() < self.duplicate_rename_rate:
+                    patient, kind = _rename(patient, self._rng), "one_person_two_ids_renamed"
                 self.duplicate_people += 1
                 self.injected_identity.append(
                     {"kind": kind, "patient_ids": sorted([person.patient_id, patient.patient_id])}

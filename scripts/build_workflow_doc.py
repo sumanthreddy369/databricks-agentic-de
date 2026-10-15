@@ -217,12 +217,12 @@ REPO_MAP = [
 NEXT = [
     ["#", "Step", "Needs", "Outcome"],
     ["1", "Connect the alert webhook (Slack / Teams) as a Databricks secret; unpause the 15-minute schedule", "You: create the webhook and the secret", "Alerts in chat, once per problem"],
-    ["2", "Detect patient identity drift in Silver (same patient_id, new name or birth date)", "A pipeline run", "The EDA defect caught by the pipeline"],
-    ["3", "Identity matching beyond typos and swapped dates (nicknames, maiden names) with a steward review queue", "-", "Fewer missed duplicates, decisions recorded"],
-    ["4", "Healthcheck job on serverless; live pipeline tools run against the workspace", "Databricks login", "The incident workflow running for real"],
+    ["2", "Unit row filter tested with real workspace groups (a nurse sees only their unit)", "Groups in the workspace", "Row-level access shown, not just column masks"],
+    ["3", "Feed steward \"same person\" decisions into a master-patient-index merge (Gold patient key)", "-", "Counts per person, not per id"],
+    ["4", "Workspace objects (catalog, volumes, secrets scope, Genie space) as Terraform", "-", "The whole setup reproducible from the repo"],
     ["5", "Claude as the router, or a Databricks-hosted model on trial credits", "A paid key, or a check of hosted models", "Free-form requests handled end to end"],
     ["6", "Agent Bricks runbook agent over the problem catalog", "Workspace", "How-to questions answered from the catalog"],
-    ["7", "Before the trial ends: stop everything; cancel the subscription", "Trial end date; you in GCP Marketplace", "No charges"],
+    ["7", "Cancel the old GCP trial subscription (that workspace is locked)", "You, in GCP Marketplace", "No charges"],
 ]
 
 
@@ -253,7 +253,7 @@ def story(fx):
         grid(
             [
                 ["Area", "State"],
-                ["Pipelines on Databricks (Free Edition; earlier GCP trial)", "Runs - regenerated data, every count matches the local prediction; event log records 241 drops, 23 identity flags"],
+                ["Pipelines on Databricks (Free Edition; earlier GCP trial)", "Runs - 103,359 simulated events (v5): 306 impossible vitals dropped; four identity checks catch 78/78 planted cases; a steward review queue decides"],
                 ["Unity Catalog masks", "Runs - 1,388 of 1,388 names and MRNs masked in Gold; row filter and grants not tested"],
                 ["Genie behind the guardrails", "Measured - 27-question golden set, 3 live runs; run 3 (Free Edition): 21/21 answers, 6/6 safety probes"],
                 ["Metrics layer", "Runs - one definition per metric for Genie and compute_metric"],

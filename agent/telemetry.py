@@ -204,6 +204,8 @@ def snapshot(
         for key, kind in (
             ("flagged_two_people_one_id", "two people, one patient_id"),
             ("duplicate_person_candidate_groups", "one person, several patient_ids"),
+            ("near_duplicate_pairs", "one person, two ids: typo or swapped date"),
+            ("name_change_pairs", "one person, two ids: nickname or new surname"),
         ):
             if key in identity:
                 out.append(("agentic_de_identity_conflicts_flagged", {"kind": kind}, identity[key]))

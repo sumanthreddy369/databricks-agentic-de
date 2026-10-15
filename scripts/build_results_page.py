@@ -79,7 +79,7 @@ def pipeline() -> list[str]:
     out += [
         f"`silver_contract_checked_events` is a view read by {gate // bronze} downstream flows, so its checks count "
         f"every event once per reader ({gate:,} = {gate // bronze} x {bronze:,}). `plausible_vital_value` drops the "
-        f"{dropped:,} physically impossible readings; the two identity checks flag (never drop) the injected cases. "
+        f"{dropped:,} physically impossible readings; the four identity checks flag (never drop) the injected cases. "
         "Counts are from the latest pipeline update only.",
         "",
     ]
@@ -94,39 +94,43 @@ def pipeline() -> list[str]:
         ],
     )
     scored = _load(RESULTS / "identity_checks_workspace.json")
-    two, exact, near = (
-        scored["two_people_one_id"],
-        scored["one_person_two_ids"],
-        scored["one_person_two_ids_variant"],
-    )
-    false_pairs = scored["false_duplicate_pairs"]
+    two = scored["two_people_one_id"]
+    unplanted = scored["unplanted_pairs_flagged"]
+    kinds = [
+        ("one_person_two_ids", "One person, two patient_ids (same details)"),
+        ("one_person_two_ids_variant", "One person, two patient_ids (name typo or day/month swapped)"),
+        ("one_person_two_ids_renamed", "One person, two patient_ids (nickname or new surname)"),
+    ]
     out += [
         "**Identity checks (catalog M2) scored against the simulator's ground truth** "
         "(`scripts/score_identity_checks.py`, flags read from the Silver tables on the workspace):",
         "",
     ]
     out += _table(
-        ["Injected problem", "Injected", "Exact check", "Fuzzy check", "Caught", "False alarms"],
-        [
-            ["Two people on one patient_id", two["injected"], "-", "-", two["flagged"], two["false_flags"]],
+        ["Injected problem", "Injected", "Exact check", "Fuzzy check", "Name-change check", "Caught"],
+        [["Two people on one patient_id", two["injected"], "-", "-", "-", two["flagged"]]]
+        + [
             [
-                "One person, two patient_ids (same details)",
-                exact["injected"],
-                exact["caught_by_exact_check"],
-                exact["caught_by_fuzzy_check"],
-                exact["caught_by_either"],
-                f"{false_pairs['exact_check']} (exact check)",
-            ],
-            [
-                "One person, two patient_ids (name typo or day/month swapped)",
-                near["injected"],
-                near["caught_by_exact_check"],
-                near["caught_by_fuzzy_check"],
-                near["caught_by_either"],
-                f"{false_pairs['fuzzy_check']} (fuzzy check)",
-            ],
+                label,
+                scored[kind]["injected"],
+                scored[kind]["caught_by_exact_check"],
+                scored[kind]["caught_by_fuzzy_check"],
+                scored[kind]["caught_by_name_change_check"],
+                scored[kind]["caught_by_any"],
+            ]
+            for kind, label in kinds
+            if kind in scored
         ],
     )
+    out += [
+        f"Raised but not planted: {two['false_flags']} shared ids; duplicate pairs - "
+        + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in unplanted.items())
+        + ". With 10 first and 10 last names, two different people can share a name and birth date by chance, "
+        "which an exact match can't tell from a duplicate - why every candidate goes to a data steward "
+        "(`agent/identity_review.py`: decisions recorded with a name in the state file and audit log; nothing is "
+        "merged automatically).",
+        "",
+    ]
     first = _load(RESULTS / "pipeline_run1_counts.json")
     out += [
         f"**GCP trial, {first['measured_at']}** (original uniform dataset; that workspace later locked sign-in):",

@@ -70,6 +70,10 @@ def snapshot(client: DatabricksClient, pipeline_id: str) -> dict:
         f"SELECT count(*) AS pairs FROM {CATALOG}.silver.silver_patient_fuzzy_duplicate_candidates LIMIT 1"
     )[0]
     identity["near_duplicate_pairs"] = fuzzy["pairs"]
+    renamed = client.execute_statement(
+        f"SELECT count(*) AS pairs FROM {CATALOG}.silver.silver_patient_name_change_candidates LIMIT 1"
+    )[0]
+    identity["name_change_pairs"] = renamed["pairs"]
     return {
         "tables": counts,
         "expectations": [

@@ -796,11 +796,11 @@ layers:
     title: Patient identity mismatch
     description: Same person under two patient_ids, or one patient_id carrying two people (name or birth date changes between admissions); MRN merges and splits. Counts and SCD1 demographics go wrong.
     who: DE + DA
-    detect: silver_patient_identity_conflicts (one_identity_per_patient_id), silver_patient_duplicate_candidates (one_patient_id_per_person) and silver_patient_fuzzy_duplicate_candidates (no_near_duplicate_registration) expectations; MRN merge events.
-    action: Report the conflicting patient_ids (counts and hashed keys, never names) to data stewards; never merge or split records automatically.
+    detect: silver_patient_identity_conflicts (one_identity_per_patient_id), silver_patient_duplicate_candidates (one_patient_id_per_person) silver_patient_fuzzy_duplicate_candidates (no_near_duplicate_registration) and silver_patient_name_change_candidates (no_name_change_registration) expectations; MRN merge events.
+    action: Report the conflicting patient_ids (counts and hashed keys, never names) to data stewards, who decide in the review queue (agent/identity_review.py); never merge or split records automatically.
     level: L1
     status: exists
-    status_note: 'Three Silver checks, scored on Databricks Free Edition against injected ground truth: two people on one id 17/17; one person under two ids 32/32 exact and 16/16 near-duplicates (name typo or swapped day/month); 0 false alarms. A steward decides.'
+    status_note: 'Four Silver checks, scored on Databricks Free Edition against injected ground truth: two people on one id 14/14; one person under two ids 27/27 same details, 18/18 name typo or swapped day/month, 19/19 nickname or new surname; 1 pair raised that is two different people sharing a name and birth date. A steward decides each candidate in the review queue.'
   - id: M3
     title: Orphan keys
     description: Encounters reference providers or units not in dim_providers because the roster lags.

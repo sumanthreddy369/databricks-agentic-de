@@ -38,6 +38,7 @@ from pyspark.sql import functions as F
 sys.path.append(SparkSession.getActiveSession().conf.get("bundle.sourcePath", "."))
 
 from common.contracts import ENCOUNTER_WATERMARK_MINUTES  # noqa: E402
+from common.identity import FORMAL_FIRST_NAME  # noqa: E402
 
 
 @dlt.view(name="encounters_cdc_view")
@@ -231,4 +232,47 @@ def silver_patient_fuzzy_duplicate_candidates():
         )
         # Near, not exact: exact name + birth date pairs are the other check's.
         .filter("name_edit_distance <= 2 AND NOT (name_edit_distance = 0 AND birth_date_match = 'same')")
+    )
+
+
+@dlt.table(
+    name="silver_patient_name_change_candidates",
+    comment=(
+        "Data-quality check (problem catalog M2): one person under two patient_ids whose name changed "
+        "beyond a typo - a nickname (common/identity.py) or a new surname - with the same birth date and "
+        "gender. Looser than the other checks, so it can also pair two different people: candidates for a "
+        "data steward (agent/identity_review.py), never merged automatically. Pairs of patient_ids only."
+    ),
+)
+@dlt.expect("no_name_change_registration", "match_reason IS NULL")
+def silver_patient_name_change_candidates():
+    nicknames = SparkSession.getActiveSession().createDataFrame(
+        sorted(FORMAL_FIRST_NAME.items()), "first_name string, formal_first_name string"
+    )
+    people = (
+        dlt.read("silver_patient_admissions")
+        .select("patient_id", F.lower("full_name").alias("name"), "birth_date", "gender")
+        .dropDuplicates()
+        .withColumn("first_name", F.regexp_extract("name", r"^(\S+)", 1))
+        .withColumn("last_name", F.regexp_extract("name", r"^\S+\s+(.*)$", 1))
+        .join(F.broadcast(nicknames), "first_name", "left")
+        # Blocking key: exact birth date, gender and the formal first name.
+        .withColumn(
+            "block", F.concat_ws("|", "gender", "birth_date", F.coalesce("formal_first_name", "first_name"))
+        )
+    )
+    a, b = people.alias("a"), people.alias("b")
+    pairs = a.join(b, (F.col("a.block") == F.col("b.block")) & (F.col("a.patient_id") < F.col("b.patient_id")))
+    return (
+        pairs.select(
+            F.col("a.patient_id").alias("patient_id_a"),
+            F.col("b.patient_id").alias("patient_id_b"),
+            F.levenshtein(F.col("a.name"), F.col("b.name")).alias("name_edit_distance"),
+            F.when(F.col("a.last_name") == F.col("b.last_name"), F.lit("nickname"))
+            .when(F.col("a.first_name") == F.col("b.first_name"), F.lit("surname changed"))
+            .otherwise(F.lit("nickname and surname changed"))
+            .alias("match_reason"),
+        )
+        # Within 2 edits is the fuzzy check's (and 0 the exact check's).
+        .filter("name_edit_distance > 2")
     )

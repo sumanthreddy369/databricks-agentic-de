@@ -72,9 +72,10 @@ targets:
       patient_events_source: files
       provider_landing_path: /Volumes/healthcare_agentic_de/bronze/landing/providers
       # Physiology data with identity defects injected, ground truth in
-      # data/landing_v4/patient_events_injected_identity.json (17 two-people-one-id,
-      # 32 exact and 16 near-duplicate one-person-two-ids). Earlier: patient_events, _v3.
-      patient_events_path: /Volumes/healthcare_agentic_de/bronze/landing/patient_events_v4
+      # docs/comparisons/results/identity_ground_truth_v5.json (14 two-people-one-id;
+      # one person under two ids: 27 exact, 18 typo/swapped date, 19 nickname/new
+      # surname). Earlier: patient_events, _v3, _v4.
+      patient_events_path: /Volumes/healthcare_agentic_de/bronze/landing/patient_events_v5
     resources:
       pipelines:
         streaming_patient_pipeline:

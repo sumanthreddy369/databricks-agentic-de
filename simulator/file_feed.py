@@ -107,6 +107,9 @@ def run(
     duplicate_variant_rate: float = typer.Option(
         0.0, help="Share of those duplicates registered with a name typo or swapped day/month."
     ),
+    duplicate_rename_rate: float = typer.Option(
+        0.0, help="Share of the other duplicates registered under a nickname or a new surname."
+    ),
 ) -> None:
     if seed >= 0:
         random.seed(seed)
@@ -116,6 +119,7 @@ def run(
         identity_collision_rate=identity_collision_rate,
         duplicate_person_rate=duplicate_person_rate,
         duplicate_variant_rate=duplicate_variant_rate,
+        duplicate_rename_rate=duplicate_rename_rate,
     )
     files = generate_files(
         Path(output_dir),

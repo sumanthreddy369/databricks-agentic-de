@@ -1,0 +1,534 @@
+[
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_70144b74",
+   "pt_b195e6fe"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_57b3e0a4",
+   "pt_fd34007f"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_0c32cf61",
+   "pt_a8b5d38c"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_2d0c1a48",
+   "pt_b3fd0b85"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_29e0ddab",
+   "pt_e45cccb0"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_0c39e80e",
+   "pt_1ad5d620"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_4cd36c02"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_524f0ea1"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_041f4adb",
+   "pt_f92472ad"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_57f971dd",
+   "pt_ac753360"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_b8bb8a0f",
+   "pt_ce2f0e59"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_04b8ca41",
+   "pt_3c7c5275"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_35606539",
+   "pt_5e6952c8"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_24d6397d",
+   "pt_861ae5cf"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_2b84415e"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_91d8a7d5",
+   "pt_cf6a7b24"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_84371545",
+   "pt_df94f50b"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_01ef620b",
+   "pt_295adf25"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_dac7ba18",
+   "pt_e94253c7"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_adc5bee8",
+   "pt_d5079750"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_31aee481",
+   "pt_52d7704e"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_82f0d82c",
+   "pt_937821de"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_1443130c",
+   "pt_4668c512"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_143b76cc",
+   "pt_bb6b31b5"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_502e7891",
+   "pt_90774fdc"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_6933e416"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_103d1776",
+   "pt_cb3702ec"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_62f63109",
+   "pt_9c398bf6"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_79b6f276",
+   "pt_86dac3af"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_6d25a086",
+   "pt_fbeee70f"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_f2fcc180"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_b48c3521",
+   "pt_f2fcc180"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_24e6bd2e",
+   "pt_5a3b1912"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_7b90b27d",
+   "pt_85997451"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_0e43e257",
+   "pt_a89b897c"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_247715d6",
+   "pt_6f5e6459"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_e9120995",
+   "pt_fa9599f8"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_e2002ebf"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_b3ab08f4"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_2120b0d2",
+   "pt_96572c2c"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_523a86bc",
+   "pt_d1c3c43c"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_879da2fc"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_67f35620",
+   "pt_6d6db5a9"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_429974d3",
+   "pt_c2201dfb"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_57f2aef2",
+   "pt_b951477e"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_59b10a78",
+   "pt_d7aacfc6"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_0c2e3e4e",
+   "pt_fcdbdee5"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_77648202",
+   "pt_d35cab40"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_47a42fce",
+   "pt_8fbeb702"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_3b7168a3",
+   "pt_a03ed520"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_56881128",
+   "pt_d33d77d6"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_b195e6fe",
+   "pt_cd337662"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_5a35f009",
+   "pt_6fdd464c"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_c8b8d926"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_f92472ad"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_85859fe4",
+   "pt_fc6e6a30"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_52f72984"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_c31dab8f",
+   "pt_e0c4cf85"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_5d6771e3",
+   "pt_675b78b1"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_a74e3346",
+   "pt_be09ca03"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_1ee5aea1",
+   "pt_d317b68c"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_205129c9"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_38c4329c",
+   "pt_abcbb326"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_e7de4bb2"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_62e18cc4",
+   "pt_a6e9a885"
+  ]
+ },
+ {
+  "kind": "two_people_one_id",
+  "patient_ids": [
+   "pt_6eb5677e"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_0220b533",
+   "pt_f24a7221"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_c267846a",
+   "pt_eb619daa"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_5d371779",
+   "pt_6a2e3ead"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_1e3456ef",
+   "pt_add34189"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_0d6b2dfb",
+   "pt_b75b8f75"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_1a63dee1",
+   "pt_b2ec1fca"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_1499cbe2",
+   "pt_fd030d40"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_renamed",
+  "patient_ids": [
+   "pt_4bc2ff95",
+   "pt_a97d2157"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_7f12807b",
+   "pt_9cf055b2"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_0e3d5ce5",
+   "pt_1fe0dbba"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids_variant",
+  "patient_ids": [
+   "pt_399d43eb",
+   "pt_f1b4b00f"
+  ]
+ },
+ {
+  "kind": "one_person_two_ids",
+  "patient_ids": [
+   "pt_5b899239",
+   "pt_aedb3639"
+  ]
+ }
+]
