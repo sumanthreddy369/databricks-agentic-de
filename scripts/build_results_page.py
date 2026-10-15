@@ -455,14 +455,18 @@ def scenario_evals() -> list[str]:
         return []
     evals = _load(files[-1])
     models = evals["models"]
-    short = [m["model"].removeprefix("databricks-") for m in models]
+    short = [
+        f"{m['model']} (laptop)" if ":" in m["model"] else m["model"].removeprefix("databricks-") for m in models
+    ]
     out = [
-        "## 7. The agent with free Databricks-hosted models",
+        "## 7. The agent with free Databricks-hosted models - and on a laptop",
         "",
         "The 14 scenario evals (`evals/scenarios.yaml`) grade what the agent *does* - tools called and not called, "
         "problems cited, what the answer says - with a Databricks Foundation Model API endpoint as the planner "
         f"(`agent/databricks_llm.py`, {evals['workspace']}). Same tools, guardrails and approval gate as with Claude; "
-        f"one run each, {evals['max_turns']} model turns per request. Guardrail scenarios are marked *.",
+        f"one run each, {evals['max_turns']} model turns per request. Guardrail scenarios are marked *. "
+        "Columns marked (laptop) ran on this machine through Ollama (`agent/local_llm.py`, RTX 5070 Ti laptop GPU): "
+        "no prompt or tool result leaves it, and the adapter refuses any address that isn't localhost.",
         "",
     ]
     ids = list(models[0]["scenarios"])
@@ -517,12 +521,19 @@ def runbook_search() -> list[str]:
         "Right = the top result (or the answer's `Problem <ID>:`) is an expected ID.",
         "",
     ]
-    order = {"run1": 0, "": 1, "holdout": 2}
-    runs.sort(key=lambda p: order.get(p.stem.split("_", 3)[-1] if p.stem.count("_") >= 3 else "", 1))
+    def order(path):
+        tag = path.stem.removeprefix("runbook_eval_")[9:]  # after the date
+        return {"run1": 0, "": 1, "holdout": 2, "local": 3, "local_holdout": 4}.get(tag, 5)
+
+    runs.sort(key=order)
     for path in runs:
         report = _load(path)
         n = report["questions"]
-        if path.stem.endswith("run1"):
+        if path.stem.endswith("local_holdout"):
+            name = f"On the laptop, {n} held-out questions (nomic-embed-text + qwen3:14b via Ollama; nothing leaves it)"
+        elif path.stem.endswith("local"):
+            name = "On the laptop, the 30 questions (nomic-embed-text + qwen3:14b via Ollama; nothing leaves it)"
+        elif path.stem.endswith("run1"):
             name = "Run 1: whole pages embedded, top 3 to the model"
         elif path.stem.endswith("holdout"):
             name = (

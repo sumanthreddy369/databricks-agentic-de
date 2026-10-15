@@ -90,14 +90,27 @@ def main(argv: list[str] | None = None) -> int:
         "--questions", default=str(QUESTIONS), help="question file (e.g. evals/runbook/holdout.yaml)"
     )
     parser.add_argument("--label", default="", help="suffix for the output file name")
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="embeddings and answers from Ollama on this machine (--model is an Ollama model)",
+    )
     args = parser.parse_args(argv)
     questions = yaml.safe_load(Path(args.questions).read_text(encoding="utf-8"))["questions"]
-    index = RunbookIndex(load_pages(), databricks_embedder(args.profile), cache_path=CACHE_PATH)
-    model = None if args.no_answer else DatabricksModel(args.model, profile=args.profile)
-    report = evaluate(questions, index, model, pause=3.0)
+    if args.local:
+        from agent.local_llm import LocalModel, local_runbook_embedders
+
+        embed, embed_query = local_runbook_embedders()
+        cache = CACHE_PATH.with_name("runbook_embeddings_nomic.json")  # different vectors, different cache
+        index = RunbookIndex(load_pages(), embed, cache_path=cache, embed_query=embed_query)
+        model = None if args.no_answer else LocalModel(args.model)
+    else:
+        index = RunbookIndex(load_pages(), databricks_embedder(args.profile), cache_path=CACHE_PATH)
+        model = None if args.no_answer else DatabricksModel(args.model, profile=args.profile)
+    report = evaluate(questions, index, model, pause=0.0 if args.local else 3.0)
     report.update(
         {
-            "embedding_endpoint": "databricks-gte-large-en",
+            "embedding_endpoint": "nomic-embed-text (Ollama, local)" if args.local else "databricks-gte-large-en",
             "answer_endpoint": None if model is None else args.model,
             "runbooks": len(index.pages),
             "workspace": "Databricks Free Edition",

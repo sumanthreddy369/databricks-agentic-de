@@ -220,7 +220,7 @@ NEXT = [
     ["2", "Unit row filter tested with real workspace groups (a nurse sees only their unit)", "Groups in the workspace", "Row-level access shown, not just column masks"],
     ["3", "Split shared patient_ids at source (re-assign the second person's admissions) after a steward confirms", "Source-system access", "Shared ids resolved, not just flagged"],
     ["4", "Grow the runbook question set from real incidents; re-check the 0.55 similarity floor on it", "Incident history", "Runbook search measured on real questions, not written ones"],
-    ["5", "Make the best-scoring hosted model the default planner; more turns or examples where models fall short", "-", "Free-form requests handled without a paid key"],
+    ["5", "Laptop-only planner by default for anything touching patient data; larger local model if the GPU allows", "-", "No prompt or tool result leaves the machine"],
     ["6", "Turn on the GitHub -> Databricks stages (validate, deploy on merge, integration run)", "You: DATABRICKS_HOST / DATABRICKS_TOKEN repo secrets", "Every merge checked against the real workspace"],
     ["7", "Cancel the old GCP trial subscription (that workspace is locked)", "You, in GCP Marketplace", "No charges"],
 ]

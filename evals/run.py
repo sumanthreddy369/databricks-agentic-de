@@ -37,9 +37,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repeat", type=int, default=1, help="runs per scenario, to measure consistency")
     parser.add_argument("--databricks-endpoint", help="a Model Serving endpoint as the planner, instead of Claude")
     parser.add_argument("--databricks-profile", help="Databricks CLI profile for that endpoint (e.g. free)")
+    parser.add_argument("--local-model", help="an Ollama model on this machine as the planner (e.g. qwen3:14b)")
     args = parser.parse_args(argv)
 
-    if args.databricks_endpoint:
+    if args.local_model:
+        from agent.local_llm import LocalModel
+
+        claude = LocalModel(args.local_model)
+    elif args.databricks_endpoint:
         # Before the live settings are cleared: the model's credentials come
         # from the profile and stay in this process, not in the tools' env.
         claude = DatabricksModel(args.databricks_endpoint, profile=args.databricks_profile)
@@ -55,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"unknown scenario ids: {sorted(missing)}", file=sys.stderr)
             return 2
 
-    if not args.databricks_endpoint:
+    if not (args.databricks_endpoint or args.local_model):
         claude = Claude(model=args.model) if args.model else Claude()
     bridge = MCPToolBridge()
     results = []

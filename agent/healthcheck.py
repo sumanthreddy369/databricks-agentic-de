@@ -78,16 +78,22 @@ def run(argv: list[str] | None = None, *, agent: OrchestratorAgent | None = None
     parser.add_argument("--audit-log-path", default=os.environ.get("AUDIT_LOG_PATH", DEFAULT_AUDIT_LOG_PATH))
     parser.add_argument(
         "--planner",
-        choices=["claude", "rules", "databricks"],
+        choices=["claude", "rules", "databricks", "local"],
         default=os.environ.get("HEALTHCHECK_PLANNER")
         or ("claude" if os.environ.get("ANTHROPIC_API_KEY") else "rules"),
         help="claude (needs ANTHROPIC_API_KEY), rules (deterministic, agent/rules_planner.py; the default "
-        "without a key) or databricks (a Model Serving endpoint, --model-endpoint)",
+        "without a key), databricks (a Model Serving endpoint, --model-endpoint) or local (an Ollama model on "
+        "this machine, --local-model; nothing leaves it)",
     )
     parser.add_argument(
         "--model-endpoint",
         default=os.environ.get("HEALTHCHECK_MODEL_ENDPOINT", "databricks-qwen35-122b-a10b"),
         help="Model Serving endpoint for --planner databricks",
+    )
+    parser.add_argument(
+        "--local-model",
+        default=os.environ.get("HEALTHCHECK_LOCAL_MODEL", "qwen3:14b"),
+        help="Ollama model for --planner local",
     )
     parser.add_argument(
         "--pipeline-ids",
@@ -131,6 +137,10 @@ def run(argv: list[str] | None = None, *, agent: OrchestratorAgent | None = None
             from agent.databricks_llm import DatabricksModel
 
             planner = DatabricksModel(args.model_endpoint)
+        elif args.planner == "local":
+            from agent.local_llm import LocalModel
+
+            planner = LocalModel(args.local_model)
         else:
             planner = None
         agent = OrchestratorAgent(claude=planner, state_path=state_path, audit_log_path=args.audit_log_path)

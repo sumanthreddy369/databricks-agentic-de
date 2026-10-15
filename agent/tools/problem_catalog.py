@@ -36,8 +36,9 @@ from agent.llm import ToolResult
 
 logger = structlog.get_logger(__name__)
 
-# Opt-in semantic ranking (RUNBOOK_SEARCH=embeddings): rank fusion of
-# Databricks-hosted embeddings over the runbook pages and this keyword search
+# Opt-in semantic ranking (RUNBOOK_SEARCH=embeddings, or =local for Ollama
+# embeddings on this machine): rank fusion of embeddings over the runbook
+# pages and this keyword search
 # (agent/runbook_search.py). On 15 held-out on-call questions it put the right
 # problem in the top 3 for 14 vs 10 for keyword search alone (docs/results.md
 # section 8). Fusion rather than embeddings alone: on a technical finding
@@ -47,8 +48,10 @@ logger = structlog.get_logger(__name__)
 #
 # Below this cosine similarity the best page isn't a match and keyword search
 # decides alone (so "no catalog match - escalate" still happens). Measured:
-# real on-call questions scored 0.59-0.76, five off-topic questions 0.37-0.50.
-SEMANTIC_MIN_SIMILARITY = 0.55
+# real on-call questions scored 0.59-0.76, five off-topic questions 0.37-0.50
+# with databricks-gte-large-en; with nomic-embed-text (local) real questions
+# scored 0.625-0.81 and off-topic ones up to 0.62, so its floor is higher.
+SEMANTIC_MIN_SIMILARITY = {"embeddings": 0.55, "local": 0.64}
 _semantic_index = None
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "knowledge" / "problem_catalog.yaml"
@@ -233,7 +236,8 @@ def lookup_problem(
 def _semantic_search(query: str, limit: int, index=None) -> list[dict] | None:
     """Catalog problems ranked by embedding similarity, or None when semantic
     ranking is off or unavailable (the caller then uses keyword search)."""
-    if index is None and os.environ.get("RUNBOOK_SEARCH") != "embeddings":
+    mode = os.environ.get("RUNBOOK_SEARCH")
+    if index is None and mode not in ("embeddings", "local"):
         return None
     global _semantic_index
     try:
@@ -241,11 +245,18 @@ def _semantic_search(query: str, limit: int, index=None) -> list[dict] | None:
             if _semantic_index is None:
                 from agent.runbook_search import CACHE_PATH, RunbookIndex, databricks_embedder, load_pages
 
-                profile = os.environ.get("RUNBOOK_SEARCH_PROFILE")
-                _semantic_index = RunbookIndex(load_pages(), databricks_embedder(profile), cache_path=CACHE_PATH)
+                if mode == "local":  # Ollama on this machine: the query never leaves it
+                    from agent.local_llm import local_runbook_embedders
+
+                    embed, embed_query = local_runbook_embedders()
+                    cache = CACHE_PATH.with_name("runbook_embeddings_nomic.json")
+                else:
+                    embed = embed_query = databricks_embedder(os.environ.get("RUNBOOK_SEARCH_PROFILE"))
+                    cache = CACHE_PATH
+                _semantic_index = RunbookIndex(load_pages(), embed, cache_path=cache, embed_query=embed_query)
             index = _semantic_index
         best = index.search(query, 1)
-        if not best or best[0][1] < SEMANTIC_MIN_SIMILARITY:
+        if not best or best[0][1] < SEMANTIC_MIN_SIMILARITY.get(mode, SEMANTIC_MIN_SIMILARITY["embeddings"]):
             return None
         ids = index.hybrid(query, limit)
     except Exception as exc:  # network, auth, rate limit: keyword search still answers

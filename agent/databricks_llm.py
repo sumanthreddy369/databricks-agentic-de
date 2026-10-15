@@ -14,6 +14,7 @@ only ever put in a request header.
 """
 
 import json
+import re
 import time
 from collections.abc import Callable
 
@@ -46,14 +47,18 @@ def openai_tools(tools: list[dict]) -> list[dict]:
     ]
 
 
+_THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
 def _text(content) -> str:
     """Message content as text: a string, or (some models, e.g. gpt-oss) a
     list of blocks of which only the `text` ones are the answer."""
     if content is None:
         return ""
-    if isinstance(content, str):
-        return content
-    return "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    if not isinstance(content, str):
+        content = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    # Reasoning models served by Ollama (qwen3) put their thinking inline.
+    return _THINK.sub("", content).strip()
 
 
 def coerce_arguments(arguments: dict, schema: dict | None) -> dict:
@@ -98,6 +103,16 @@ class DatabricksModel:
         self._http = httpx.Client(timeout=timeout, transport=transport)
         self.tracer = tracer if tracer is not None else Tracer()
 
+    # Overridden by agent/local_llm.py (Ollama on this machine).
+    def _url(self) -> str:
+        return f"{self._config.host.rstrip('/')}/serving-endpoints/{self.model}/invocations"
+
+    def _headers(self) -> dict:
+        return self._config.authenticate()
+
+    def _body_extra(self) -> dict:
+        return {}
+
     @tenacity.retry(
         retry=tenacity.retry_if_exception_type((_Retryable, httpx.TransportError)),
         # Free Edition rate-limits bursts (429s for over a minute seen during
@@ -107,14 +122,10 @@ class DatabricksModel:
         reraise=True,
     )
     def _chat(self, messages: list[dict], tools: list[dict]) -> dict:
-        body = {"messages": messages, "max_tokens": MAX_TOKENS, "temperature": 0}
+        body = {"messages": messages, "max_tokens": MAX_TOKENS, "temperature": 0, **self._body_extra()}
         if tools:
             body["tools"] = tools
-        response = self._http.post(
-            f"{self._config.host.rstrip('/')}/serving-endpoints/{self.model}/invocations",
-            headers=self._config.authenticate(),
-            json=body,
-        )
+        response = self._http.post(self._url(), headers=self._headers(), json=body)
         if response.status_code in (429, 500, 502, 503, 504):
             raise _Retryable(f"{response.status_code}")
         if response.status_code == 400 and "did not respect the required format" in response.text:

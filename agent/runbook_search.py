@@ -104,9 +104,17 @@ def _key(text: str) -> str:
 
 
 class RunbookIndex:
-    def __init__(self, pages: dict[str, str], embed: Embedder, cache_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        pages: dict[str, str],
+        embed: Embedder,
+        cache_path: Path | None = None,
+        embed_query: Embedder | None = None,
+    ) -> None:
         self.pages = pages
         self._embed = embed
+        # Some models embed questions differently from documents (nomic: task prefixes).
+        self._embed_query = embed_query or embed
         self._ids = list(pages)
         texts = {pid: focus(pages[pid]) for pid in self._ids}
         cache = json.loads(cache_path.read_text()) if cache_path and cache_path.exists() else {}
@@ -119,7 +127,7 @@ class RunbookIndex:
         self._vectors = [_unit(cache[_key(texts[pid])]) for pid in self._ids]
 
     def search(self, question: str, k: int = 3) -> list[tuple[str, float]]:
-        q = _unit(self._embed([question])[0])
+        q = _unit(self._embed_query([question])[0])
         scored = [(pid, sum(a * b for a, b in zip(q, v))) for pid, v in zip(self._ids, self._vectors)]
         return sorted(scored, key=lambda item: -item[1])[:k]
 

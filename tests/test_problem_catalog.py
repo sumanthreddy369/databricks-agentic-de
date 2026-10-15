@@ -173,3 +173,16 @@ def test_nothing_similar_enough_leaves_it_to_keyword_search(monkeypatch):
 def test_semantic_failure_falls_back_to_keyword(monkeypatch):
     payload = _lookup_with(monkeypatch, _FakeIndex(error=ConnectionError("rate limited")), "sentinel values 999")
     assert payload["ranking"] == "keyword" and payload["matches"]
+
+
+def test_local_embeddings_have_their_own_higher_floor(monkeypatch):
+    """nomic-embed-text scores off-topic questions up to 0.62 (gte-large: 0.50),
+    so 0.60 is a match for the hosted model but not for the local one."""
+    import agent.tools.problem_catalog as pc
+
+    hits = [("M4", 0.60)]
+    monkeypatch.setattr(pc, "_semantic_index", _FakeIndex(hits))
+    monkeypatch.setenv("RUNBOOK_SEARCH", "embeddings")
+    assert json.loads(pc.lookup_problem(query="recipe for bread").content)["ranking"] == "embeddings"
+    monkeypatch.setenv("RUNBOOK_SEARCH", "local")
+    assert json.loads(pc.lookup_problem(query="recipe for bread").content)["ranking"] == "keyword"
