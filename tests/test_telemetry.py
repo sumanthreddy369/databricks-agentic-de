@@ -250,7 +250,11 @@ WORKSPACE = {
         {"dataset": "silver_fct_vitals", "expectation": "plausible_vital_value", "passed": 99352, "failed": 241}
     ],
     "masks": {"patients": 1359, "names_masked": 1359, "mrns_masked": 1358},
-    "identity_check": {"patient_ids_admitted_more_than_once": 23, "flagged_two_people_one_id": 23},
+    "identity_check": {
+        "patient_ids_admitted_more_than_once": 23,
+        "flagged_two_people_one_id": 23,
+        "duplicate_person_candidate_groups": 27,
+    },
 }
 
 
@@ -262,7 +266,8 @@ def test_workspace_snapshot_becomes_pipeline_health_metrics():
     assert m[("agentic_de_pipeline_expectation_records", failed)] == 241
     # One unmasked MRN must show as less than 100% - the weaker of the two masks counts.
     assert m[("agentic_de_phi_masked_share", ())] == round(1358 / 1359, 4)
-    assert m[("agentic_de_identity_conflicts_flagged", ())] == 23
+    assert m[("agentic_de_identity_conflicts_flagged", (("kind", "two people, one patient_id"),))] == 23
+    assert m[("agentic_de_identity_conflicts_flagged", (("kind", "one person, several patient_ids"),))] == 27
     assert m[("agentic_de_pipeline_snapshot_age_hours", ())] == 2.0
 
 

@@ -287,12 +287,13 @@ def panels() -> list[dict]:
         )
     )
     p.append(
-        stat(
-            "Identity conflicts flagged (M2)",
-            "agentic_de_identity_conflicts_flagged",
+        bars(
+            "Identity problems flagged (M2)",
+            'agentic_de_identity_conflicts_flagged{kind!=""}',
+            "{{kind}}",
             {"h": 5, "w": 6, "x": 6, "y": 52},
-            thresholds=[{"color": GOOD, "value": None}, {"color": WARNING, "value": 1}],
-            description="patient_ids carrying two people. Flagged, never merged: a data steward decides.",
+            description="Two people on one patient_id, and one person under several. Flagged, never merged: a "
+            "data steward decides.",
         )
     )
     p.append(
@@ -318,7 +319,7 @@ def panels() -> list[dict]:
     p.append(
         bars(
             "Rows per table",
-            'agentic_de_pipeline_table_rows{table=~"gold.*|silver.silver_patient_identity_conflicts"}',
+            'agentic_de_pipeline_table_rows{table=~"gold.*|silver.silver_patient_(identity_conflicts|duplicate_candidates)"}',
             "{{table}}",
             {"h": 9, "w": 12, "x": 12, "y": 57},
         )

@@ -62,7 +62,7 @@ METRICS = {
     "agentic_de_pipeline_table_rows": "Rows per table in the newest Databricks workspace snapshot",
     "agentic_de_pipeline_expectation_records": "Records passed / failed per pipeline expectation (event log)",
     "agentic_de_phi_masked_share": "Share of Gold patients whose name and MRN are masked (should be 1)",
-    "agentic_de_identity_conflicts_flagged": "patient_ids flagged as two people on one id (catalog M2)",
+    "agentic_de_identity_conflicts_flagged": "Identity problems flagged (catalog M2), by kind",
     "agentic_de_pipeline_snapshot_age_hours": "Hours since the newest workspace snapshot",
     "agentic_de_anomaly_recall_at_matched_false_alarms": "Recall with the model's threshold matched to NEWS2's "
     "false-alarm rate on stable patients",
@@ -201,8 +201,12 @@ def snapshot(
             masked = min(masks["names_masked"], masks["mrns_masked"]) / masks["patients"]
             out.append(("agentic_de_phi_masked_share", {}, round(masked, 4)))
         identity = workspace.get("identity_check") or {}
-        if "flagged_two_people_one_id" in identity:
-            out.append(("agentic_de_identity_conflicts_flagged", {}, identity["flagged_two_people_one_id"]))
+        for key, kind in (
+            ("flagged_two_people_one_id", "two people, one patient_id"),
+            ("duplicate_person_candidate_groups", "one person, several patient_ids"),
+        ):
+            if key in identity:
+                out.append(("agentic_de_identity_conflicts_flagged", {"kind": kind}, identity[key]))
         measured = datetime.strptime(workspace["measured_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
         out.append(
             ("agentic_de_pipeline_snapshot_age_hours", {}, round((now - measured).total_seconds() / 3600, 2))

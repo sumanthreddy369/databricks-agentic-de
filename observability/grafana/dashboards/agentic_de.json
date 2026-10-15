@@ -1288,9 +1288,9 @@
       "id": 25
     },
     {
-      "type": "stat",
-      "title": "Identity conflicts flagged (M2)",
-      "description": "patient_ids carrying two people. Flagged, never merged: a data steward decides.",
+      "type": "bargauge",
+      "title": "Identity problems flagged (M2)",
+      "description": "Two people on one patient_id, and one person under several. Flagged, never merged: a data steward decides.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1307,45 +1307,42 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(agentic_de_identity_conflicts_flagged)",
+          "expr": "max by (kind) (agentic_de_identity_conflicts_flagged{kind!=\"\"})",
           "instant": true,
-          "legendFormat": "",
+          "legendFormat": "{{kind}}",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "none",
+          "min": 0,
           "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "#0ca30c",
-                "value": null
-              },
-              {
-                "color": "#fab219",
-                "value": 1
-              }
-            ]
+            "mode": "fixed",
+            "fixedColor": "#2a78d6"
           }
         },
         "overrides": []
       },
       "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true,
+        "namePlacement": "left",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 15
+        },
+        "minVizHeight": 14,
+        "maxVizHeight": 22,
+        "valueMode": "text",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
           ],
           "fields": "",
           "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "none",
-        "textMode": "value"
+        }
       },
       "id": 26
     },
@@ -1491,7 +1488,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max by (table) (agentic_de_pipeline_table_rows{table=~\"gold.*|silver.silver_patient_identity_conflicts\"})",
+          "expr": "max by (table) (agentic_de_pipeline_table_rows{table=~\"gold.*|silver.silver_patient_(identity_conflicts|duplicate_candidates)\"})",
           "instant": true,
           "legendFormat": "{{table}}",
           "refId": "A"
