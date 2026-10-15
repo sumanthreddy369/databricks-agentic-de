@@ -1,14 +1,20 @@
 # Keeps the SHA-pinned actions and the Python dependencies current, monthly.
 # A pin only protects while someone updates it; Dependabot's PRs bump the
-# SHA and its "# vX.Y.Z" comment together.
+# SHA and its "# vX.Y.Z" comment together. The cooldown waits 14 days after
+# a release before proposing it: a compromised release is usually caught
+# and pulled within days.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "monthly"
+    cooldown:
+      default-days: 14
   - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "monthly"
+    cooldown:
+      default-days: 14
     open-pull-requests-limit: 5

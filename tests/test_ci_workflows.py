@@ -71,3 +71,9 @@ def test_guardrail_job_runs_every_guardrail_test_file():
         "tests/test_audit_trail.py",
     }
     assert all((REPO / f).exists() for f in named)
+
+
+def test_dependabot_waits_two_weeks_before_proposing_a_release():
+    config = _load(REPO / ".github" / "dependabot.yml")
+    assert {u["package-ecosystem"] for u in config["updates"]} == {"github-actions", "uv"}
+    assert all(u["cooldown"]["default-days"] >= 14 for u in config["updates"])
