@@ -16,9 +16,9 @@ Steps, each safe to repeat:
    the bronze.landing volume, unless that folder already has files.
 3. Secret scope `healthcare_agentic_de` (empty; secrets are put by a person).
 4. `databricks bundle deploy`, then optionally a pipeline run.
-
-Not covered: the Genie space (create it in the UI, then
-scripts/sync_genie_space.py <space_id> writes its instructions from the repo).
+5. The Genie space from governance/genie/space.json: updated if a space
+   with its title exists, created on the warehouse otherwise
+   (scripts/sync_genie_space.py --upsert).
 Uses the Databricks CLI for everything; credentials stay with the CLI profile.
 """
 
@@ -106,6 +106,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"UPLOAD {args.patient_events} -> {VOLUME}/{args.feed_name} (if empty)")
         print(f"SECRET SCOPE {SECRET_SCOPE} (if missing)")
         print(f"BUNDLE DEPLOY -t {args.target}" + (" + pipeline run" if args.run_pipeline else ""))
+        print("GENIE SPACE from governance/genie/space.json (update by title, or create)")
         return 0
 
     wh = warehouse(args.profile)
@@ -146,6 +147,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.run_pipeline:
         _cli(["bundle", "run", "streaming_patient_pipeline", "-t", args.target], args.profile)
         report["pipeline"] = "update completed"
+
+    import sync_genie_space  # scripts/, beside this file
+
+    space_id, action = sync_genie_space.upsert(args.profile, wh)
+    report["genie_space"] = f"{action} {space_id}"
     print(json.dumps(report, indent=1))
     return 0
 

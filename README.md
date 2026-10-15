@@ -46,7 +46,7 @@ the defects measurable: they're planted, and the ground truth is committed. Deta
 | Genie | 27-question golden set, live: Genie + guardrails 27/27 in run 3 (Genie alone 26/27, a group of one patient suppressed by the guard); 26/27 in run 4 (one Genie timeout) |
 | Deterioration | At NEWS2's 1.8% false-alarm rate, the calibrated ONNX model catches 61% of deteriorating panels vs NEWS2's 47% (simulated physiology only) |
 | Operations | Serverless health check alerts once per problem; a live pipeline restart ran only after a named approval; every action in the audit log |
-| CI/CD | GitHub Actions modeled on Databricks' bundle-examples: lint, guardrail tests, 500 tests, a pipeline integration gate that fails on any missed planted defect, docs-in-sync, bundle validate/deploy, SHA-pinned actions |
+| CI/CD | GitHub Actions modeled on Databricks' bundle-examples: lint, guardrail tests, 502 tests, a pipeline integration gate that fails on any missed planted defect, docs-in-sync, bundle validate/deploy, SHA-pinned actions |
 
 **Health check, no AI needed:** the scheduled DE health check runs as a
 serverless job on Databricks Free Edition. A deterministic rules planner
@@ -348,7 +348,7 @@ databricks-agentic-de/
 │   ├── comparisons/                # Genie golden-set results (results/) + Agent Bricks / Vertex AI plans
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
-├── tests/                          # mocked Anthropic client, zero network calls, 500 tests
+├── tests/                          # mocked Anthropic client, zero network calls, 502 tests
 ├── .github/workflows/              # ci.yml (lint, guardrails, tests, integration), bundle.yml, workflow-lint.yml
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
@@ -890,7 +890,7 @@ suite mocks this) and other optional configuration.
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
 | `uv run python -m agent.healthcheck [--planner rules\|claude] [--pipeline-ids JSON]` | One DE-mode health check; the rules planner is the default without `ANTHROPIC_API_KEY`. Exit 0 healthy, 1 agent unavailable, 2 escalated, 3 waiting for approval |
-| `uv run pytest` | Run the full test suite (500 tests, zero network calls) |
+| `uv run pytest` | Run the full test suite (502 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
 | `databricks bundle validate` | Validate the Asset Bundle against a real workspace (Databricks-only) |
@@ -996,7 +996,7 @@ live infrastructure, or pure planning with no implementation at all
 | Real-time problem catalog + `lookup_problem` tool (`agent/knowledge/problem_catalog.yaml`, `agent/tools/problem_catalog.py`) | Complete - 104 problems with expected response and autonomy level; matching tested on hand-written incident descriptions (not an independent benchmark) |
 | Scenario evals (`evals/`) | Runs - 14 scenarios against five Databricks-hosted models on Free Edition (`evals.run --databricks-endpoint`): Qwen 3.5 122B 14/14 (42/42 over three runs), Qwen3-Next 80B 12/14, GPT-OSS 120B 11/14, Llama 3.3 70B and Llama 4 Maverick 10/14 (`docs/results.md` section 7). The runs found three bugs, each fixed with a test: a wrong-type tool argument crashed the request; forced pages were missing from the audit log; three scenarios demanded a tool the prompt tells the agent not to prefer. Not yet run against Claude (no paid key) |
 | Databricks-hosted model as planner (`agent/databricks_llm.py`) | Runs - same `run_tool_loop` interface as Claude, OpenAI-compatible tool calling against Model Serving endpoints, retries on rate limits and the endpoint's malformed-output 400, decodes objects sent as JSON strings where the tool schema says object. Used by `evals.run` and `agent.healthcheck --planner databricks` (default endpoint Qwen 3.5 122B); a local health check with it checked, looked up B1 and paged, all audited. The scheduled job keeps the deterministic rules planner |
-| Workspace setup from the repo (`scripts/setup_workspace.py`) | Runs - re-run against Free Edition: 10 SQL statements (catalog, schemas, volumes, decisions table, mask and row-filter functions), landing uploads skipped as present, secret scope created, bundle deployed. Group creation and grants (17 statements) are held back unless `--with-groups`; the Genie space is still created in the UI |
+| Workspace setup from the repo (`scripts/setup_workspace.py`) | Runs - re-run against Free Edition: 10 SQL statements (catalog, schemas, volumes, decisions table, mask and row-filter functions), landing uploads skipped as present, secret scope created, bundle deployed, Genie space updated from `governance/genie/space.json` (found by title; created if missing - the create path was tested with a throwaway space, then trashed). Group creation and grants (17 statements) are held back unless `--with-groups` |
 | CI (`.github/workflows/ci.yml`: lint, guardrail tests, unit tests, pipeline integration on simulated data, docs in sync; `workflow-lint.yml`) | Runs - on every push and PR; actions pinned to commit SHAs, policy enforced by `tests/test_ci_workflows.py` |
 | CD - bundle validate / deploy / workspace integration (`.github/workflows/bundle.yml`) | Written, skip path runs - needs `DATABRICKS_HOST`/`DATABRICKS_TOKEN` repo secrets (a person adds them); the same commands (validate, deploy, run, score with `--require-all`, stop) ran by hand against Free Edition |
 | Lakeflow (DLT) medallion pipeline (`pipeline/`) | Runs - on Databricks Free Edition (`free` target) with the regenerated data, counts matching the local prediction and the event log recording every expectation (`docs/results.md`); earlier on the GCP trial workspace (dev, serverless, triggered) and run end to end on synthetic data; layer counts reconcile. Dataset graph also checked statically by `tests/test_dlt_pipeline_graph.py`. Not yet run continuously or on a Kafka source |
@@ -1015,7 +1015,7 @@ live infrastructure, or pure planning with no implementation at all
 ## Testing
 
 ```bash
-uv run pytest            # full suite: 500 tests, ~2 min, zero network calls
+uv run pytest            # full suite: 502 tests, ~2 min, zero network calls
 uv run pytest -q         # quiet output
 uv run pytest tests/test_masking_guard.py tests/test_prompt_injection_guard.py  # the two core guardrail proofs
 uv run ruff check .      # lint
