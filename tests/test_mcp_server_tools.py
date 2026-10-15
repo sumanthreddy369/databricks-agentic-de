@@ -252,9 +252,9 @@ def test_audit_trail_append_only_guarantee_holds_for_mcp_routed_dispatch(bridge,
 
 def test_kill_switch_and_audit_trail_both_hold_for_mcp_routed_remediation(bridge, tmp_path):
     """A (table, expectation) pair with the kill switch disabled must still
-    be refused, and the refusal must still show up as exactly one audit-log
-    entry — both guardrails proven together, driven end-to-end through the
-    real MCP bridge instead of a fake one.
+    be refused, and the refusal must still show up in the audit log, after
+    the page the kill switch forced - both guardrails proven together, driven
+    end-to-end through the real MCP bridge instead of a fake one.
     """
     state = json.loads(EXAMPLE_STATE.read_text())
     state["tables"]["silver_vitals"]["expectations"]["plausible_vital_value"]["failure_count"] = 5
@@ -276,9 +276,9 @@ def test_kill_switch_and_audit_trail_both_hold_for_mcp_routed_remediation(bridge
     assert len(final_state["incidents"]) == 1
 
     audit_lines = _read_audit_lines(audit_log_path)
-    assert len(audit_lines) == 1
-    assert audit_lines[0]["tool"] == "quarantine_bad_records"
-    assert audit_lines[0]["is_error"] is True
+    assert [line["tool"] for line in audit_lines] == ["notify_and_page", "quarantine_bad_records"]
+    assert audit_lines[0]["input"]["forced_by"] == "kill_switch"
+    assert audit_lines[1]["is_error"] is True
 
 
 # --- guarantee re-verification: PHI masking (DA-mode stays direct-dispatch) --

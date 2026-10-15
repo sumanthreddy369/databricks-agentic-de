@@ -58,9 +58,10 @@ stored token. Running it live found and fixed two silent failures:
 - **Audit writes failed on volumes.** Unity Catalog volumes reject
   append-mode writes, so every audit write failed.
 
-**Still not run:** pipeline restart through the live API, the unit row
-filter for restricted groups, Terraform and Cloud Run. No real-model
-(Claude) eval results exist yet.
+**Still not run:** the unit row filter for restricted groups (needs
+workspace groups), the GCP Terraform and Cloud Run. No Claude eval results
+exist (no paid key); the scenario evals run on free Databricks-hosted
+models instead - Qwen 3.5 122B passes 14/14, three runs each.
 
 **Data and model checked:**
 
@@ -983,7 +984,9 @@ live infrastructure, or pure planning with no implementation at all
 | GCP Secret Manager integration (`agent/secrets.py`) | Complete (no-op unless `GCP_PROJECT_ID` is set) |
 | Scheduled DE health-check job (`agent/healthcheck.py`, `resources/workflows.yml:agent_pipeline_healthcheck`, `agent/rules_planner.py`, `agent/tools/alerting.py`) | Runs - serverless on Databricks Free Edition, no secrets, rules planner without a model key. Alerts once per problem (webhook from a Databricks secret if set, else the failure email) and fails its run only for something new: first run found 3 problems and failed (alert); the next run with the same problems succeeded with a "known problems" note. Schedule paused (development mode) |
 | Real-time problem catalog + `lookup_problem` tool (`agent/knowledge/problem_catalog.yaml`, `agent/tools/problem_catalog.py`) | Complete - 104 problems with expected response and autonomy level; matching tested on hand-written incident descriptions (not an independent benchmark) |
-| Scenario evals (`evals/`) | Partial - harness, graders, and 14 scenarios tested with a scripted model; **not yet run against the real model**, so no pass rate exists |
+| Scenario evals (`evals/`) | Runs - 14 scenarios against five Databricks-hosted models on Free Edition (`evals.run --databricks-endpoint`): Qwen 3.5 122B 14/14 (42/42 over three runs), Qwen3-Next 80B 12/14, GPT-OSS 120B 11/14, Llama 3.3 70B and Llama 4 Maverick 10/14 (`docs/results.md` section 7). The runs found three bugs, each fixed with a test: a wrong-type tool argument crashed the request; forced pages were missing from the audit log; three scenarios demanded a tool the prompt tells the agent not to prefer. Not yet run against Claude (no paid key) |
+| Databricks-hosted model as planner (`agent/databricks_llm.py`) | Runs - same `run_tool_loop` interface as Claude, OpenAI-compatible tool calling against Model Serving endpoints, retries on rate limits and the endpoint's malformed-output 400, decodes objects sent as JSON strings where the tool schema says object. Used by `evals.run` and `agent.healthcheck --planner databricks` (default endpoint Qwen 3.5 122B); a local health check with it checked, looked up B1 and paged, all audited. The scheduled job keeps the deterministic rules planner |
+| Workspace setup from the repo (`scripts/setup_workspace.py`) | Runs - re-run against Free Edition: 10 SQL statements (catalog, schemas, volumes, decisions table, mask and row-filter functions), landing uploads skipped as present, secret scope created, bundle deployed. Group creation and grants (17 statements) are held back unless `--with-groups`; the Genie space is still created in the UI |
 | CI — lint + test (`.github/workflows/ci.yml`) | Complete |
 | CI — bundle validate (`.github/workflows/bundle-validate.yml`) | Complete (its skip path is what actually runs here; `databricks bundle validate` itself is untested) |
 | Lakeflow (DLT) medallion pipeline (`pipeline/`) | Runs - on Databricks Free Edition (`free` target) with the regenerated data, counts matching the local prediction and the event log recording every expectation (`docs/results.md`); earlier on the GCP trial workspace (dev, serverless, triggered) and run end to end on synthetic data; layer counts reconcile. Dataset graph also checked statically by `tests/test_dlt_pipeline_graph.py`. Not yet run continuously or on a Kafka source |

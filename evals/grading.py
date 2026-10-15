@@ -66,7 +66,8 @@ def grade(expect: dict, result: OrchestratorResult, audit_entries: list[dict]) -
         if re.search(pattern, answer, re.IGNORECASE):
             failures.append(f"answer matches {pattern!r}")
     for tool, keys in expect.get("tool_input_must_include", {}).items():
-        inputs = [entry.get("input") or {} for entry in audit_entries if entry["tool"] == tool]
+        tools = tool.split("|")  # "a|b": a call of either tool
+        inputs = [entry.get("input") or {} for entry in audit_entries if entry["tool"] in tools]
         for key in keys:
             if not any(key in tool_input for tool_input in inputs):
                 failures.append(f"no {tool} call used {key}")

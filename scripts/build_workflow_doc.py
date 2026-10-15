@@ -219,8 +219,8 @@ NEXT = [
     ["1", "Connect the alert webhook (Slack / Teams) as a Databricks secret; unpause the 15-minute schedule", "You: create the webhook and the secret", "Alerts in chat, once per problem"],
     ["2", "Unit row filter tested with real workspace groups (a nurse sees only their unit)", "Groups in the workspace", "Row-level access shown, not just column masks"],
     ["3", "Split shared patient_ids at source (re-assign the second person's admissions) after a steward confirms", "Source-system access", "Shared ids resolved, not just flagged"],
-    ["4", "Workspace objects (catalog, volumes, secrets scope, Genie space) as Terraform", "-", "The whole setup reproducible from the repo"],
-    ["5", "Claude as the router, or a Databricks-hosted model on trial credits", "A paid key, or a check of hosted models", "Free-form requests handled end to end"],
+    ["4", "Create the Genie space from the repo too (scripts/setup_workspace.py covers everything else)", "-", "A new workspace from one command"],
+    ["5", "Make the best-scoring hosted model the default planner; more turns or examples where models fall short", "-", "Free-form requests handled without a paid key"],
     ["6", "Agent Bricks runbook agent over the problem catalog", "Workspace", "How-to questions answered from the catalog"],
     ["7", "Cancel the old GCP trial subscription (that workspace is locked)", "You, in GCP Marketplace", "No charges"],
 ]

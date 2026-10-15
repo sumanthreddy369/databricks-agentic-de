@@ -441,6 +441,61 @@ def live_operations() -> list[str]:
     return out + [""]
 
 
+SAFETY_SCENARIOS = {
+    "de-kill-switch-blocks-remediation",
+    "da-c5-small-group-is-suppressed",
+    "da-f6-phi-demand-is-refused",
+    "da-c4-injection-in-a-text-field",
+}
+
+
+def scenario_evals() -> list[str]:
+    files = sorted(RESULTS.glob("scenario_evals_*.json"))
+    if not files:
+        return []
+    evals = _load(files[-1])
+    models = evals["models"]
+    short = [m["model"].removeprefix("databricks-") for m in models]
+    out = [
+        "## 7. The agent with free Databricks-hosted models",
+        "",
+        "The 14 scenario evals (`evals/scenarios.yaml`) grade what the agent *does* - tools called and not called, "
+        "problems cited, what the answer says - with a Databricks Foundation Model API endpoint as the planner "
+        f"(`agent/databricks_llm.py`, {evals['workspace']}). Same tools, guardrails and approval gate as with Claude; "
+        f"one run each, {evals['max_turns']} model turns per request. Guardrail scenarios are marked *.",
+        "",
+    ]
+    ids = list(models[0]["scenarios"])
+    rows = []
+    for sid in ids:
+        cells = []
+        for m in models:
+            r = m["scenarios"].get(sid)
+            cells.append(
+                "-" if r is None else "n/a" if r["model_unavailable"] else "pass" if r["passed"] else "FAIL"
+            )
+        rows.append([f"`{sid}`" + (" *" if sid in SAFETY_SCENARIOS else "")] + cells)
+    rows.append(
+        ["**Passed**"]
+        + [
+            f"**{m['passed']}/{m['valid_runs']}**"
+            + (f" ({m['runs_passed']}/{m['runs_total']} runs)" if m.get("runs_per_scenario", 1) > 1 else "")
+            for m in models
+        ]
+    )
+    out += _table(["Scenario"] + short, rows)
+    out += [
+        "A scenario passes for a model only if every run passed. Fixes these runs led to: a tool argument of the "
+        "wrong JSON type crashed the request instead of returning a tool error; objects sent as JSON strings are "
+        "now decoded where the tool's schema says object; pages forced by the kill switch or escalation ceiling "
+        "were sent but missing from the audit log; three scenarios required `aggregate_gold_table` by name although "
+        "the prompt prefers `compute_metric` (which runs through it). The health check's hosted-model planner "
+        "defaults to the best scorer.",
+        "",
+    ]
+    return out
+
+
 def build() -> str:
     lines = [
         "# Results",
@@ -449,7 +504,7 @@ def build() -> str:
         "the saved reports. Synthetic data throughout; nothing here describes real patients.",
         "",
     ]
-    for section in (pipeline, golden, eda, detectors, stacks, live_operations):
+    for section in (pipeline, golden, eda, detectors, stacks, live_operations, scenario_evals):
         lines += section()
     return "\n".join(lines).rstrip() + "\n"
 

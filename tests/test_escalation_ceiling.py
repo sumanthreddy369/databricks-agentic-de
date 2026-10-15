@@ -9,6 +9,7 @@ scripted "misbehaving" fake Claude keeps asking to quarantine the same thing.
 import json
 from pathlib import Path
 
+from agent.llm import ToolResult
 from agent.orchestrator import ESCALATION_CEILING, OrchestratorAgent
 from agent.tools import pipeline_health
 
@@ -107,3 +108,24 @@ def test_forced_escalation_result_is_marked_as_error(tmp_path):
     payload = json.loads(result.content)
     assert payload["escalated"] is True
     assert payload["reason"] == "escalation_ceiling_reached"
+
+
+def test_forced_pages_are_in_the_audit_log(tmp_path):
+    """The page the ceiling and the kill switch force is an action: audited,
+    marked with what forced it (found by the hosted-model evals, where the
+    page happened but the audit trail didn't show it)."""
+    example = Path(__file__).resolve().parent.parent / "data" / "state" / "pipeline_state.example.json"
+    state = json.loads(example.read_text())
+    state["autonomous_remediation_enabled"] = False
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps(state))
+    audit = tmp_path / "audit.jsonl"
+
+    class _Bridge:
+        def dispatch(self, name, tool_input):
+            return ToolResult("", json.dumps({"ok": True, "paged": True}))
+
+    agent = OrchestratorAgent(claude=None, state_path=state_path, audit_log_path=audit, mcp_bridge=_Bridge())
+    agent._dispatch("restart_pipeline", {"pipeline": "streaming_patient_pipeline"})
+    lines = [json.loads(x) for x in audit.read_text().splitlines()]
+    assert lines[0]["tool"] == "notify_and_page" and lines[0]["input"]["forced_by"] == "kill_switch"

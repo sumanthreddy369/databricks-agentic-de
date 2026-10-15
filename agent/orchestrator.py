@@ -787,6 +787,10 @@ class OrchestratorAgent:
         notify_input = {"state_path": str(self.state_path), "message": message}
         escalation = self.mcp_bridge.dispatch("notify_and_page", notify_input)
         self._tool_calls.append("notify_and_page")
+        # The page is an action like any other: audited (and counted by
+        # detect_anomalous_activity), not only logged. Found by the hosted-model
+        # evals: the page happened but the audit trail didn't show it.
+        self._append_audit_log("notify_and_page", {**notify_input, "forced_by": "kill_switch"}, escalation)
         logger.warning("kill_switch_refused_tool", tool=tool_name, tool_input=tool_input)
         payload = {
             "ok": False,
@@ -804,6 +808,7 @@ class OrchestratorAgent:
         notify_input = {"state_path": str(self.state_path), "message": message}
         escalation = self.mcp_bridge.dispatch("notify_and_page", notify_input)
         self._tool_calls.append("notify_and_page")
+        self._append_audit_log("notify_and_page", {**notify_input, "forced_by": "escalation_ceiling"}, escalation)
         logger.warning("escalation_ceiling_reached", table=table, expectation=expectation, attempts=attempts)
         payload = {
             "ok": False,

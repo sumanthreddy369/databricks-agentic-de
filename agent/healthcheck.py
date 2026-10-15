@@ -28,7 +28,9 @@ remediation enabled and no history, which is what a first run needs.
 Planner: Claude when ANTHROPIC_API_KEY is set, otherwise the deterministic
 rules planner (agent/rules_planner.py) - same tools, guardrails, approval
 gate and audit log, decisions taken from the problem catalog's autonomy
-levels. `--planner` or HEALTHCHECK_PLANNER overrides.
+levels. `--planner` or HEALTHCHECK_PLANNER overrides; `--planner databricks`
+uses a Databricks-hosted model (`--model-endpoint`, agent/databricks_llm.py)
+with the run's own credentials - no paid key.
 """
 
 import argparse
@@ -76,11 +78,16 @@ def run(argv: list[str] | None = None, *, agent: OrchestratorAgent | None = None
     parser.add_argument("--audit-log-path", default=os.environ.get("AUDIT_LOG_PATH", DEFAULT_AUDIT_LOG_PATH))
     parser.add_argument(
         "--planner",
-        choices=["claude", "rules"],
+        choices=["claude", "rules", "databricks"],
         default=os.environ.get("HEALTHCHECK_PLANNER")
         or ("claude" if os.environ.get("ANTHROPIC_API_KEY") else "rules"),
-        help="claude (needs ANTHROPIC_API_KEY) or rules (deterministic, agent/rules_planner.py; the default "
-        "without a key)",
+        help="claude (needs ANTHROPIC_API_KEY), rules (deterministic, agent/rules_planner.py; the default "
+        "without a key) or databricks (a Model Serving endpoint, --model-endpoint)",
+    )
+    parser.add_argument(
+        "--model-endpoint",
+        default=os.environ.get("HEALTHCHECK_MODEL_ENDPOINT", "databricks-qwen35-122b-a10b"),
+        help="Model Serving endpoint for --planner databricks",
     )
     parser.add_argument(
         "--pipeline-ids",
@@ -112,7 +119,14 @@ def run(argv: list[str] | None = None, *, agent: OrchestratorAgent | None = None
     state_path = Path(args.state_path)
     _ensure_state_file(state_path)
     if agent is None:
-        planner = RulesPlanner() if args.planner == "rules" else None
+        if args.planner == "rules":
+            planner = RulesPlanner()
+        elif args.planner == "databricks":
+            from agent.databricks_llm import DatabricksModel
+
+            planner = DatabricksModel(args.model_endpoint)
+        else:
+            planner = None
         agent = OrchestratorAgent(claude=planner, state_path=state_path, audit_log_path=args.audit_log_path)
 
     before = _read_state(state_path)

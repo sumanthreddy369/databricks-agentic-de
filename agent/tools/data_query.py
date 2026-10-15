@@ -97,7 +97,18 @@ def _bind(params: list[tuple[str, object]], value: object) -> str:
     return f":{params[-1][0]}"
 
 
+def check_shapes(filters: object = None, group_by: object = None) -> None:
+    """Model-supplied arguments of the wrong JSON type (seen live: a filter
+    written as a SQL string) become a tool error the model can correct, not
+    an exception that ends the request."""
+    if filters is not None and not isinstance(filters, dict):
+        raise ValueError('filters must be an object of column: value, e.g. {"unit": "ICU"}')
+    if group_by is not None and not isinstance(group_by, list):
+        raise ValueError('group_by must be a list of column names, e.g. ["unit"]')
+
+
 def _equality_clauses(table: str, filters: dict | None, params: list[tuple[str, object]]) -> list[str]:
+    check_shapes(filters=filters)
     return [
         f"{_check_column(table, column, 'filter')} = {_bind(params, _check_value(column, value))}"
         for column, value in (filters or {}).items()
@@ -252,6 +263,7 @@ def _build_aggregate(
     qualified_table: str,
     weight: str | None = None,
 ) -> tuple[str, list[tuple[str, object]]]:
+    check_shapes(filters=filters, group_by=group_by)
     metric_sql = _metric_sql(table, metric, column, weight)
     group_cols = [_check_column(table, g, "group by") for g in (group_by or [])]
     if len(group_cols) > _MAX_GROUP_BY:

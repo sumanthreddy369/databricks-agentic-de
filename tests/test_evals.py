@@ -50,7 +50,8 @@ def test_scenario_is_well_formed(scenario):
     expect = scenario.get("expect") or {}
     assert expect, "a scenario with no expectations can't fail"
     named_tools = set(expect.get("must_call", [])) | set(expect.get("must_not_call", []))
-    named_tools |= set(expect.get("must_call_any", [])) | set(expect.get("tool_input_must_include", {}))
+    named_tools |= set(expect.get("must_call_any", []))
+    named_tools |= {t for key in expect.get("tool_input_must_include", {}) for t in key.split("|")}
     assert named_tools <= TOOL_NAMES, named_tools - TOOL_NAMES
     for problem_id in expect.get("must_cite", []) + expect.get("must_cite_any", []):
         assert problem_id in CATALOG, problem_id
@@ -110,6 +111,15 @@ def test_grader_reports_each_failed_check():
     failures = grade(expect, result, entries)
 
     assert len(failures) == 10, failures
+
+
+def test_tool_input_check_accepts_either_named_tool():
+    expect = {"tool_input_must_include": {"aggregate_gold_table|compute_metric": ["as_of"]}}
+    result = OrchestratorResult(mode="da", answer="22")
+    assert grade(expect, result, _entries(("compute_metric", {"as_of": "2026-09-21T09:00:00"}))) == []
+    assert grade(expect, result, _entries(("compute_metric", {}))) == [
+        "no aggregate_gold_table|compute_metric call used as_of"
+    ]
 
 
 def test_citing_requires_the_exact_id():
@@ -184,5 +194,5 @@ def test_counting_with_the_aggregate_tool_passes_and_counting_rows_fails():
 
     assert run_scenario(_scenario("da-f2-count-past-the-row-cap"), right)["passed"]
     wrong_outcome = run_scenario(_scenario("da-f2-count-past-the-row-cap"), wrong)
-    assert "did not call aggregate_gold_table" in wrong_outcome["failures"]
+    assert "called none of ['aggregate_gold_table', 'compute_metric']" in wrong_outcome["failures"]
     assert any("mentions none of" in f for f in wrong_outcome["failures"])

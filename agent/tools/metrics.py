@@ -68,6 +68,7 @@ def _resolve(metric_id: str, group_by, filters, since, until, as_of):
         raise ValueError(f"unknown metric {metric_id!r}; defined metrics: {sorted(metrics)}")
     m = metrics[metric_id]
     allowed_dims = m.get("dimensions", [])
+    data_query.check_shapes(filters=filters, group_by=group_by)
 
     for dim in group_by or []:
         if dim not in allowed_dims:
