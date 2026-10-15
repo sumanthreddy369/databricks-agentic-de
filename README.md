@@ -47,7 +47,7 @@ the defects measurable: they're planted, and the ground truth is committed. Deta
 | Deterioration | At NEWS2's 1.8% false-alarm rate, the calibrated ONNX model catches 61% of deteriorating panels vs NEWS2's 47% (simulated physiology only) |
 | Runbook search | "Which problem is this, and what do I do?" over 104 runbook pages: hybrid retrieval + a hosted model answered 14 of 15 held-out on-call questions right, vs 6 of 15 for the agent's keyword lookup (Agent Bricks Knowledge Assistant is legacy for new accounts, so built from hosted embeddings + chat) |
 | Operations | Serverless health check alerts once per problem; a live pipeline restart ran only after a named approval; every action in the audit log |
-| CI/CD | GitHub Actions modeled on Databricks' bundle-examples: lint, guardrail tests, 515 tests, a pipeline integration gate that fails on any missed planted defect, docs-in-sync, bundle validate/deploy, SHA-pinned actions |
+| CI/CD | GitHub Actions modeled on Databricks' bundle-examples: lint, guardrail tests, 516 tests, a pipeline integration gate that fails on any missed planted defect, docs-in-sync, bundle validate/deploy, SHA-pinned actions |
 
 **Health check, no AI needed:** the scheduled DE health check runs as a
 serverless job on Databricks Free Edition. A deterministic rules planner
@@ -349,7 +349,7 @@ databricks-agentic-de/
 │   ├── comparisons/                # Genie golden-set results (results/) + Agent Bricks / Vertex AI plans
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
-├── tests/                          # mocked Anthropic client, zero network calls, 515 tests
+├── tests/                          # mocked Anthropic client, zero network calls, 516 tests
 ├── .github/workflows/              # ci.yml (lint, guardrails, tests, integration), bundle.yml, workflow-lint.yml
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
@@ -801,6 +801,36 @@ the workspace's free quota, and the integration run always ends by stopping the 
 read-only token permissions, no secret ever echoed, deploys that never overlap, and a guardrail job that names every
 guardrail test file.
 
+
+### CI/CD screenshots - before and after
+
+Captured from the public GitHub Actions pages by `scripts/capture_cicd_screenshots.ps1`; the two summary images are
+drawn from the committed results by `scripts/build_cicd_images.py`.
+
+![What changed](docs/images/cicd/00_before_after.png)
+
+| Before | After |
+|---|---|
+| ![Old CI: one job](docs/images/cicd/01_before_ci.png) | ![New CI: five staged jobs](docs/images/cicd/03_after_ci.png) |
+| Old CI: one lint+test job, Node.js 20 warning | New CI: lint gates guardrails + tests, then the pipeline integration check (identity scorecard attached); docs in sync; no warnings |
+| ![Old bundle check](docs/images/cicd/02_before_bundle_validate.png) | ![Bundle stages](docs/images/cicd/05_after_bundle_stages.png) |
+| Old bundle check: always skipped | Validate, then deploy (on merge, opt-in) and the integration run (manual), skipped visibly until repo secrets exist |
+
+**The gate working:** a commit with a lint error stopped every later job.
+
+![Lint gate](docs/images/cicd/04_after_ci_gate_caught_lint.png)
+
+**Workflow lint, Dependabot and run history:**
+
+![Workflow lint](docs/images/cicd/06_workflow_lint.png)
+![Dependabot PRs](docs/images/cicd/07_dependabot_prs.png)
+![Actions history](docs/images/cicd/08_actions_history.png)
+
+**CD on Databricks Free Edition** - deploy, run the pipeline, verify on the workspace, run the serverless health
+check, stop - and the alert-swallowing retry it found:
+
+![CD on Databricks](docs/images/cicd/09_cd_databricks.png)
+
 ---
 
 ## Build requirements
@@ -891,7 +921,7 @@ suite mocks this) and other optional configuration.
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
 | `uv run python -m agent.healthcheck [--planner rules\|claude] [--pipeline-ids JSON]` | One DE-mode health check; the rules planner is the default without `ANTHROPIC_API_KEY`. Exit 0 healthy, 1 agent unavailable, 2 escalated, 3 waiting for approval |
-| `uv run pytest` | Run the full test suite (515 tests, zero network calls) |
+| `uv run pytest` | Run the full test suite (516 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
 | `databricks bundle validate` | Validate the Asset Bundle against a real workspace (Databricks-only) |
@@ -1017,7 +1047,7 @@ live infrastructure, or pure planning with no implementation at all
 ## Testing
 
 ```bash
-uv run pytest            # full suite: 515 tests, ~2 min, zero network calls
+uv run pytest            # full suite: 516 tests, ~2 min, zero network calls
 uv run pytest -q         # quiet output
 uv run pytest tests/test_masking_guard.py tests/test_prompt_injection_guard.py  # the two core guardrail proofs
 uv run ruff check .      # lint
