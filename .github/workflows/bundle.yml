@@ -1,0 +1,126 @@
+name: Bundle
+
+# Databricks Asset Bundle stages, following Databricks' bundle-examples
+# (mlops_stacks): validate on every PR and push, deploy on merge to the
+# default branch, and an integration run (deploy + run + check results)
+# against the workspace.
+#
+# All three need repository secrets DATABRICKS_HOST and DATABRICKS_TOKEN for
+# the workspace the `free` target points at; without them each job says so
+# in the run summary and skips (green, but visibly a skip). Deploying on
+# merge additionally needs the repository variable DEPLOY_ON_MERGE=true, and
+# the integration run is manual only - both spend the workspace's free
+# quota, so they never start on their own. Every workspace job stops the
+# warehouse and pipelines when it ends.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      integration:
+        description: "Deploy, run the streaming pipeline and score the identity checks on the workspace"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  BUNDLE_TARGET: free
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      has_workspace: ${{ steps.creds.outputs.present }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Workspace credentials configured?
+        id: creds
+        env:
+          HOST: ${{ secrets.DATABRICKS_HOST }}
+          TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          if [ -n "$HOST" ] && [ -n "$TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "**Skipped:** no DATABRICKS_HOST / DATABRICKS_TOKEN secrets - bundle not validated against a workspace." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: databricks/setup-cli@9230f12203ef173d0b901846f62a55ce997efef7 # v1.19.0
+        if: steps.creds.outputs.present == 'true'
+      - name: Validate bundle
+        if: steps.creds.outputs.present == 'true'
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks bundle validate -t "$BUNDLE_TARGET"
+
+  deploy:
+    # On merge to master, only when opted in (DEPLOY_ON_MERGE=true).
+    needs: validate
+    if: >-
+      github.event_name == 'push' && needs.validate.outputs.has_workspace == 'true'
+      && vars.DEPLOY_ON_MERGE == 'true'
+    runs-on: ubuntu-latest
+    environment: free
+    concurrency:
+      group: bundle-deploy-free
+      cancel-in-progress: false
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: databricks/setup-cli@9230f12203ef173d0b901846f62a55ce997efef7 # v1.19.0
+      - name: Deploy bundle
+        run: databricks bundle deploy -t "$BUNDLE_TARGET"
+
+  integration:
+    # Manual only: deploy, run the pipeline, then score the Silver identity
+    # checks on the workspace against the committed ground truth.
+    needs: validate
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.integration
+      && needs.validate.outputs.has_workspace == 'true'
+    runs-on: ubuntu-latest
+    environment: free
+    concurrency:
+      group: bundle-deploy-free
+      cancel-in-progress: false
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      DATABRICKS_WAREHOUSE_ID: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
+      ANTHROPIC_API_KEY: ""
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: databricks/setup-cli@9230f12203ef173d0b901846f62a55ce997efef7 # v1.19.0
+      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync --extra dev
+      - name: Deploy bundle
+        run: databricks bundle deploy -t "$BUNDLE_TARGET"
+      - name: Run the streaming pipeline (one update)
+        run: databricks bundle run streaming_patient_pipeline -t "$BUNDLE_TARGET"
+      - name: Identity checks on the workspace catch every planted case
+        run: >-
+          uv run python scripts/score_identity_checks.py docs/comparisons/results/identity_ground_truth_v5.json
+          --out identity_scorecard_workspace.json --require-all
+      - name: Scorecard in the run summary
+        if: always()
+        run: |
+          {
+            echo "### Identity checks on the workspace"
+            echo '```json'
+            cat identity_scorecard_workspace.json 2>/dev/null || echo "no scorecard"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Stop the warehouse and pipelines
+        if: always()
+        run: uv run python scripts/stop_everything.py

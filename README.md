@@ -348,7 +348,7 @@ databricks-agentic-de/
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
 ├── tests/                          # mocked Anthropic client, zero network calls, 453 tests
-├── .github/workflows/              # ci.yml (lint+test), bundle-validate.yml (Databricks-gated)
+├── .github/workflows/              # ci.yml (lint, guardrails, tests, integration), bundle.yml, workflow-lint.yml
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
 └── pyproject.toml                  # uv-managed deps, ruff config, pytest config
@@ -757,38 +757,47 @@ MLflow model version. `mlruns/` is gitignored; only the exported
 
 ## Flow: CI build and deploy
 
-**Status: Complete for `ci.yml` (lint + test on every push to `master` and every PR; the same commands pass locally). The
-Databricks-side `bundle-validate.yml` job is a real, working CI job whose
-`databricks bundle validate` step is gated on repo secrets this project
-doesn't have configured, so it exercises only its own skip path here.**
+**Status: Runs.** Modeled on Databricks' own CI/CD examples
+([databricks/bundle-examples](https://github.com/databricks/bundle-examples), `mlops_stacks`): unit tests gate an
+integration stage, the bundle is validated on every change and deployed on merge, the workflow files are linted, and
+every external action is pinned to a full commit SHA (Dependabot keeps the pins current).
 
 ```mermaid
 flowchart LR
-    A["push or pull_request"] --> B["ci.yml:\nastral-sh/setup-uv"]
-    B --> C["uv python install 3.11"]
-    C --> D["uv sync --extra dev"]
-    D --> E["uv run ruff check ."]
-    E --> F["uv run pytest"]
-    A --> G["bundle-validate.yml"]
-    G --> H{"DATABRICKS_HOST and\nDATABRICKS_TOKEN secrets set?"}
-    H -->|"yes"| I["databricks bundle validate"]
-    H -->|"no"| J["skip gracefully\nlog message, exit 0"]
+    A["push / pull_request"] --> L["ci.yml: lint (ruff)"]
+    L --> G["guardrails
+(masking, injection, MCP path,
+kill switch, ceiling, audit)"]
+    L --> T["unit tests (pytest)"]
+    L --> D["docs-in-sync
+(regenerate results page,
+fail on diff)"]
+    G --> I["pipeline-integration
+simulated feed with planted defects
+-> identity checks (DuckDB replica)
+-> fail if any case missed"]
+    T --> I
+    A --> V["bundle.yml: validate -t free"]
+    V -->|"merge + DEPLOY_ON_MERGE=true"| P["deploy -t free"]
+    V -->|"manual run, integration=true"| W["deploy -> run pipeline
+-> score identity checks on the workspace
+-> stop everything"]
+    A --> K["workflow-lint.yml: actionlint
+(checksum-verified download)"]
 ```
 
-**Two independent workflows, deliberately.** `ci.yml` (lint + test) always
-runs to completion with no external dependency — `uv sync --extra dev` pulls
-the `dev` optional-dependency group (`ruff`, `pytest`) from `pyproject.toml`,
-and the full 324-test suite makes zero network calls (mocked Anthropic
-client throughout). `bundle-validate.yml` checks for
-`DATABRICKS_HOST`/`DATABRICKS_TOKEN` repo secrets **before** installing the
-Databricks CLI or running `databricks bundle validate`, and exits 0 with a
-log line if they're absent, rather than failing CI over infrastructure this
-portfolio project doesn't have.
+| Workflow | Runs on | Needs | What fails it |
+|---|---|---|---|
+| `ci.yml` | every push and PR | nothing (no network, no model key) | lint; any guardrail test; any unit test; a planted identity defect the checks miss; `docs/results.md` out of date |
+| `bundle.yml` | every push and PR; deploy on merge; integration by hand | repo secrets `DATABRICKS_HOST`, `DATABRICKS_TOKEN` (and variables `DEPLOY_ON_MERGE`, `DATABRICKS_WAREHOUSE_ID`) | an invalid bundle; a failed deploy or pipeline run; a planted case missed on the workspace |
+| `workflow-lint.yml` | changes under `.github/` | nothing | a broken workflow file |
 
-**Status note**: because neither workflow has ever run against a live
-Databricks workspace in this environment, `databricks bundle validate` has
-never actually validated the bundle end-to-end — its CI job has only ever
-exercised the skip branch.
+Without the workspace secrets, `bundle.yml` says so in the run summary and skips - green, but visibly a skip, so it
+never claims a validation that didn't happen. Deploys and the integration run never start on their own: they spend
+the workspace's free quota, and the integration run always ends by stopping the warehouse and pipelines.
+`tests/test_ci_workflows.py` enforces the policy on the workflow files themselves: SHA pins with a version comment,
+read-only token permissions, no secret ever echoed, deploys that never overlap, and a guardrail job that names every
+guardrail test file.
 
 ---
 
@@ -987,8 +996,8 @@ live infrastructure, or pure planning with no implementation at all
 | Scenario evals (`evals/`) | Runs - 14 scenarios against five Databricks-hosted models on Free Edition (`evals.run --databricks-endpoint`): Qwen 3.5 122B 14/14 (42/42 over three runs), Qwen3-Next 80B 12/14, GPT-OSS 120B 11/14, Llama 3.3 70B and Llama 4 Maverick 10/14 (`docs/results.md` section 7). The runs found three bugs, each fixed with a test: a wrong-type tool argument crashed the request; forced pages were missing from the audit log; three scenarios demanded a tool the prompt tells the agent not to prefer. Not yet run against Claude (no paid key) |
 | Databricks-hosted model as planner (`agent/databricks_llm.py`) | Runs - same `run_tool_loop` interface as Claude, OpenAI-compatible tool calling against Model Serving endpoints, retries on rate limits and the endpoint's malformed-output 400, decodes objects sent as JSON strings where the tool schema says object. Used by `evals.run` and `agent.healthcheck --planner databricks` (default endpoint Qwen 3.5 122B); a local health check with it checked, looked up B1 and paged, all audited. The scheduled job keeps the deterministic rules planner |
 | Workspace setup from the repo (`scripts/setup_workspace.py`) | Runs - re-run against Free Edition: 10 SQL statements (catalog, schemas, volumes, decisions table, mask and row-filter functions), landing uploads skipped as present, secret scope created, bundle deployed. Group creation and grants (17 statements) are held back unless `--with-groups`; the Genie space is still created in the UI |
-| CI — lint + test (`.github/workflows/ci.yml`) | Complete |
-| CI — bundle validate (`.github/workflows/bundle-validate.yml`) | Complete (its skip path is what actually runs here; `databricks bundle validate` itself is untested) |
+| CI (`.github/workflows/ci.yml`: lint, guardrail tests, unit tests, pipeline integration on simulated data, docs in sync; `workflow-lint.yml`) | Runs - on every push and PR; actions pinned to commit SHAs, policy enforced by `tests/test_ci_workflows.py` |
+| CD - bundle validate / deploy / workspace integration (`.github/workflows/bundle.yml`) | Written, skip path runs - needs `DATABRICKS_HOST`/`DATABRICKS_TOKEN` repo secrets (a person adds them); the same commands (validate, deploy, run, score with `--require-all`, stop) ran by hand against Free Edition |
 | Lakeflow (DLT) medallion pipeline (`pipeline/`) | Runs - on Databricks Free Edition (`free` target) with the regenerated data, counts matching the local prediction and the event log recording every expectation (`docs/results.md`); earlier on the GCP trial workspace (dev, serverless, triggered) and run end to end on synthetic data; layer counts reconcile. Dataset graph also checked statically by `tests/test_dlt_pipeline_graph.py`. Not yet run continuously or on a Kafka source |
 | Patient identity checks (`silver_patient_identity_conflicts`, `silver_patient_duplicate_candidates`, `silver_patient_fuzzy_duplicate_candidates`, `silver_patient_name_change_candidates`, problem catalog M2) and the steward review queue (`agent/identity_review.py`) | Runs - scored on Databricks Free Edition against the simulator's ground truth (`scripts/score_identity_checks.py`, v5 feed): two people on one patient_id 14/14; one person under two ids 27/27 same details, 18/18 name typo or swapped day/month, 19/19 nickname or new surname (16 by the name-change check, 3 already within 2 edits); 1 pair raised that is two different people with the same name and birth date - why a steward decides. The queue lists the 80 candidates by id and reason only (never names); a decision is recorded with a name in the state file and audit log; nothing is merged automatically. `publish` copies decisions to `ops.identity_decisions`, and `gold.dim_patient_person` gives confirmed ids one person_key: with every candidate decided by a simulated steward (ground-truth replay, labelled as such), 1,411 patient_ids became 1,347 people - exactly the ground truth. Local DuckDB replica gives identical results |
 | Unity Catalog masks + row filters (`governance/05_unity_catalog/`, declared in `pipeline/04_gold/`) | Partial - column masks verified on the workspace (all names/MRNs redacted in Gold); row filter attached but not tested with a restricted group; grants and account groups not applied (`CREATE GROUP` isn't how account groups are created) |

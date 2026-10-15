@@ -1,7 +1,7 @@
 # Databricks Asset Bundle resource definitions for the two DLT pipelines.
-# Not deployed/validated against a real workspace in this environment — see
-# .github/workflows/bundle-validate.yml, which skips gracefully without
-# DATABRICKS_HOST/DATABRICKS_TOKEN secrets.
+# Deployed and run on the `free` target (Databricks Free Edition). CI
+# (.github/workflows/bundle.yml) validates it when DATABRICKS_HOST /
+# DATABRICKS_TOKEN repo secrets exist and skips visibly otherwise.
 #
 # Target cloud is GCP (see databricks.yml's workspace host and
 # `provider_landing_path`'s gs:// default). `streaming_patient_pipeline`

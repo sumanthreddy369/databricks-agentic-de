@@ -179,7 +179,7 @@ STACK = [
     ["Evaluation", "Golden question set; scenario evals", "-", "27 live questions, 3 configurations; 14 scripted scenarios", "evals/golden/, evals/", "Measured (golden); scenarios not run on a real model"],
     ["Secrets", "GCP Secret Manager", "google-cloud-secret-manager 2.30.0", "No tokens in files; no-op unless configured", "agent/secrets.py", "Tested locally (no-op path)"],
     ["Infrastructure", "Terraform, Cloud Run (GCP)", "Terraform >=1.5", "GCS bucket, service account, Pub/Sub, Secret Manager", "infra/", "Never run"],
-    ["CI", "GitHub Actions", "-", "Lint + tests on every push", ".github/workflows/", "Runs - passing on GitHub"],
+    ["CI", "GitHub Actions", "-", "Lint, guardrail tests, tests, pipeline integration, docs in sync; bundle validate/deploy", ".github/workflows/", "Runs - passing on GitHub"],
     ["Cost control", "stop_everything", "-", "Cancel runs, pause schedules, stop pipelines and warehouses", "scripts/stop_everything.py", "Validated - dry run on the workspace"],
 ]
 

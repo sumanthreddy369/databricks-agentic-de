@@ -74,9 +74,11 @@ uv run python -m mcp_server.server        # run the MCP server standalone
 uv run python -m simulator.producer --patients 1000 --duration 60   # requires docker compose up -d first
 ```
 
-CI (`.github/workflows/ci.yml`) runs exactly `uv sync --extra dev`,
-`uv run ruff check .`, `uv run pytest` on every push to `master` and every PR. Match
-that before considering a change done.
+CI (`.github/workflows/ci.yml`) runs `uv sync --extra dev`, `uv run ruff check .`,
+the guardrail tests, `uv run pytest`, a pipeline integration check on simulated data,
+and regenerates `docs/results.md` (failing if it differs) on every push to `master` and
+every PR. Match that before considering a change done. Pin any new action to a full
+commit SHA with a `# vX.Y.Z` comment (`tests/test_ci_workflows.py` enforces it).
 
 ## Code conventions observed in this repo
 

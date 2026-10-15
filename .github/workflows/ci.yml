@@ -1,29 +1,126 @@
 name: CI
 
+# Modeled on Databricks' bundle-examples (mlops_stacks): unit tests gate an
+# integration stage, actions are pinned to full commit SHAs (a tag can be
+# moved to a malicious commit; Dependabot keeps the pins current), and runs
+# of the same ref don't overlap. The integration stage here runs locally on
+# simulated data, so it needs no workspace and costs nothing; the workspace
+# stages are in bundle.yml.
+
 on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Never a real key in CI: everything runs without a paid model.
+  ANTHROPIC_API_KEY: ""
+  PYTHONIOENCODING: utf-8
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
         with:
-          version: "latest"
-
-      - name: Set up Python
-        run: uv python install 3.11
-
-      - name: Install dependencies
-        run: uv sync --extra dev
-
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync --extra dev
       - name: Lint (ruff)
         run: uv run ruff check .
 
-      - name: Test (pytest)
-        run: uv run pytest
+  guardrails:
+    # The safety guarantees on their own, so a failure says which one broke:
+    # PHI masking, prompt-injection scanning, the MCP tool path, kill switch,
+    # escalation ceiling, audit trail.
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync --extra dev
+      - name: Guardrail tests
+        run: >-
+          uv run pytest -q tests/test_masking_guard.py tests/test_prompt_injection_guard.py
+          tests/test_mcp_server_tools.py tests/test_kill_switch.py tests/test_escalation_ceiling.py
+          tests/test_audit_trail.py
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync --extra dev
+      - name: Unit tests (pytest)
+        run: uv run pytest -q
+
+  pipeline-integration:
+    # End to end on simulated data, no workspace: generate a feed with
+    # identity defects planted, run the Silver identity checks' DuckDB
+    # replica over it, and fail if any planted case is missed.
+    needs: [guardrails, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync --extra dev
+      - name: Generate a simulated feed (fixed seed)
+        run: >-
+          uv run python -m simulator.file_feed --patients 80 --duration 300 --seconds-per-file 60
+          --end 2026-10-07T02:28:34Z --seed 7 --identity-collision-rate 0.03 --duplicate-person-rate 0.08
+          --duplicate-variant-rate 0.4 --duplicate-rename-rate 0.5 --output-dir ci_feed/patient_events
+      - name: Identity checks catch every planted case
+        run: >-
+          uv run python scripts/score_identity_checks.py ci_feed/patient_events_injected_identity.json
+          --local ci_feed/patient_events --out identity_scorecard.json --require-all
+      - name: Scorecard in the run summary
+        if: always()
+        run: |
+          {
+            echo "### Identity checks on a simulated feed"
+            echo '```json'
+            cat identity_scorecard.json 2>/dev/null || echo "no scorecard"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: identity-scorecard
+          path: identity_scorecard.json
+          if-no-files-found: warn
+
+  docs-in-sync:
+    # docs/results.md is generated from the committed result files; a
+    # change to either without regenerating fails here.
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync --extra dev
+      - name: Regenerate the results page
+        run: uv run python scripts/build_results_page.py
+      - name: Fail if it differs from the committed page
+        run: git diff --exit-code -- docs/results.md

@@ -1,0 +1,35 @@
+name: Workflow lint
+
+# Lints the workflow files themselves (as Databricks' bundle-examples does):
+# actionlint catches broken expressions, unknown inputs and shell mistakes
+# before a workflow fails in CI. Downloaded from its release and checked
+# against the published SHA-256, never piped from a URL into a shell.
+
+on:
+  pull_request:
+    paths: [".github/**"]
+  push:
+    branches: [master]
+    paths: [".github/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ACTIONLINT_VERSION: "1.7.7"
+  ACTIONLINT_SHA256: "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757"
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install actionlint
+        run: |
+          curl -fsSL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum --check --strict
+          tar xzf actionlint.tar.gz actionlint
+      - name: Lint workflows
+        run: ./actionlint -color

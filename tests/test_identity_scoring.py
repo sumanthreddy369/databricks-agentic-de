@@ -153,3 +153,13 @@ def test_local_replica_finds_every_injected_case_in_a_simulated_feed(tmp_path):
     assert result["one_person_two_ids_renamed"]["injected"] > 0
     for kind in ("one_person_two_ids", "one_person_two_ids_variant", "one_person_two_ids_renamed"):
         assert result[kind]["caught_by_any"] == result[kind]["injected"]
+
+
+def test_missed_cases_names_what_a_check_let_through():
+    report = {
+        "two_people_one_id": {"injected": 3, "flagged": 2, "false_flags": 0},
+        "one_person_two_ids": {"injected": 5, "caught_by_any": 5},
+        "one_person_two_ids_renamed": {"injected": 4, "caught_by_any": 3},
+        "unplanted_pairs_flagged": {"exact_check": 1},
+    }
+    assert score_identity_checks.missed_cases(report) == {"two_people_one_id": 1, "one_person_two_ids_renamed": 1}

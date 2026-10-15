@@ -1,6 +1,6 @@
 # Databricks Asset Bundle definition. Deployed and run on the `free` target
 # (Databricks Free Edition) and earlier on `dev` (a GCP trial workspace, now
-# locked). CI (.github/workflows/bundle-validate.yml) validates only when
+# locked). CI (.github/workflows/bundle.yml) validates only when
 # DATABRICKS_HOST / DATABRICKS_TOKEN repo secrets exist.
 bundle:
   name: databricks-agentic-de

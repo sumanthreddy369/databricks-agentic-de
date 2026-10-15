@@ -93,15 +93,37 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("manifest", help="ground truth written by simulator.file_feed")
     parser.add_argument("--local", default=None, help="compute the flags from these landed files instead")
+    parser.add_argument("--out", default=None, help="write the report here instead of docs/comparisons/results/")
+    parser.add_argument(
+        "--require-all", action="store_true", help="exit 1 unless every planted case was caught (CI)"
+    )
     args = parser.parse_args(argv)
     truth = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
     flags = flags_from_files(Path(args.local)) if args.local else flags_from_workspace()
     report = {"source": "local DuckDB replica" if args.local else "Databricks workspace", **score(truth, flags)}
-    out = OUT_DIR / f"identity_checks_{'local' if args.local else 'workspace'}.json"
+    out = (
+        Path(args.out) if args.out else OUT_DIR / f"identity_checks_{'local' if args.local else 'workspace'}.json"
+    )
     out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=1))
     print(f"wrote {out}")
+    missed = missed_cases(report)
+    if args.require_all and missed:
+        print(f"MISSED planted cases: {missed}")
+        return 1
     return 0
+
+
+def missed_cases(report: dict) -> dict:
+    """Planted cases a check didn't catch, by kind (empty means all caught)."""
+    missed = {}
+    two = report.get("two_people_one_id", {})
+    if two.get("flagged", 0) < two.get("injected", 0):
+        missed["two_people_one_id"] = two["injected"] - two["flagged"]
+    for kind, r in report.items():
+        if isinstance(r, dict) and "caught_by_any" in r and r["caught_by_any"] < r["injected"]:
+            missed[kind] = r["injected"] - r["caught_by_any"]
+    return missed
 
 
 if __name__ == "__main__":
