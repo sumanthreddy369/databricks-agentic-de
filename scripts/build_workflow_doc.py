@@ -155,7 +155,7 @@ W5 = [26, 62, 70, 75, 34]
 
 STACK = [
     ["Layer", "Technology", "Version", "What it does here", "Repo path", "Status"],
-    ["Language / tooling", "Python, uv, ruff, pytest", "Python >=3.11; ruff 0.16.8; pytest 9.1.1", "uv-only package management, lint, 442 tests with zero network calls", "pyproject.toml, uv.lock, tests/", "Tested locally - passing in CI"],
+    ["Language / tooling", "Python, uv, ruff, pytest", "Python >=3.11; ruff 0.16.8; pytest 9.1.1", "uv-only package management, lint, 453 tests with zero network calls", "pyproject.toml, uv.lock, tests/", "Tested locally - passing in CI"],
     ["Data source", "Patient-event simulator (Synthea / MIMIC-IV-shaped, synthetic)", "-", "Admit / transfer / discharge + 6 vitals; Kafka publisher or JSON-lines files", "simulator/", "Runs - 103,301 events generated and ingested"],
     ["Transport (free trial)", "Autoloader over a Unity Catalog volume", "-", "Reads JSON-lines files; no extra service", "simulator/file_feed.py, pipeline/01_ingest/", "Runs on Databricks"],
     ["Transport (prod)", "Kafka / Redpanda", "confluent-kafka 2.15.1", "Production event stream; local broker via Docker", "docker-compose.yml, simulator/producer.py", "Tested locally - not run on Databricks"],
@@ -211,14 +211,14 @@ REPO_MAP = [
     ["observability/", "OTel Collector, Prometheus, Grafana provisioning and dashboard"],
     ["scripts/", "eda_landing, demo_traffic, build_* (Genie space, dashboard, images, docs), stop_everything"],
     ["docs/", "plan, architecture, eda/, comparisons/ (Genie results), images/, this document"],
-    ["tests/", "442 tests, one file per concern, zero network calls"],
+    ["tests/", "453 tests, one file per concern, zero network calls"],
 ]
 
 NEXT = [
     ["#", "Step", "Needs", "Outcome"],
-    ["1", "Health-check incidents to a real channel (email / Slack webhook) instead of the job-failure email", "-", "Escalations reach a person directly"],
+    ["1", "Connect the alert webhook (Slack / Teams) as a Databricks secret; unpause the 15-minute schedule", "You: create the webhook and the secret", "Alerts in chat, once per problem"],
     ["2", "Detect patient identity drift in Silver (same patient_id, new name or birth date)", "A pipeline run", "The EDA defect caught by the pipeline"],
-    ["3", "Probabilistic identity matching (name variants, transposed dates) beyond exact name + birth date", "-", "Fewer missed duplicates, scored against injected cases"],
+    ["3", "Identity matching beyond typos and swapped dates (nicknames, maiden names) with a steward review queue", "-", "Fewer missed duplicates, decisions recorded"],
     ["4", "Healthcheck job on serverless; live pipeline tools run against the workspace", "Databricks login", "The incident workflow running for real"],
     ["5", "Claude as the router, or a Databricks-hosted model on trial credits", "A paid key, or a check of hosted models", "Free-form requests handled end to end"],
     ["6", "Agent Bricks runbook agent over the problem catalog", "Workspace", "How-to questions answered from the catalog"],
@@ -469,7 +469,7 @@ def story(fx):
         [
             ["Change code", "glue or guardrail only"],
             ["ruff check", "lint"],
-            ["pytest", "442 tests, no network,", "no API key"],
+            ["pytest", "453 tests, no network,", "no API key"],
             ["Guardrail tests", "masking, injection, MCP", "when core files change"],
             ["Commit + push", "master"],
             ["GitHub Actions CI", "lint + tests"],

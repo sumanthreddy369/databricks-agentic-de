@@ -53,6 +53,22 @@ def _jittered_next_due(now: datetime) -> datetime:
     return now + timedelta(seconds=random.uniform(*VITAL_JITTER_SECONDS))
 
 
+def _vary(patient: PatientSnapshot, rng) -> PatientSnapshot:
+    """A registration-desk difference: a typo or transposition in the name, or
+    day and month swapped in the birth date (when the swap is a valid date)."""
+    year, month, day = patient.birth_date.split("-")
+    if rng.random() < 0.3 and int(day) <= 12 and day != month:
+        return replace(patient, birth_date=f"{year}-{day}-{month}")
+    name = list(patient.full_name)
+    letters = [i for i, c in enumerate(name[:-1]) if c.isalpha() and name[i + 1].isalpha()]
+    i = rng.choice(letters)
+    if rng.random() < 0.5:
+        name[i], name[i + 1] = name[i + 1], name[i]  # transposition
+    else:
+        name[i] = rng.choice([c for c in "aeiourstln" if c != name[i].lower()])  # one-letter typo
+    return replace(patient, full_name="".join(name))
+
+
 class Population:
     def __init__(
         self,
@@ -60,13 +76,19 @@ class Population:
         rng: random.Random | None = None,
         identity_collision_rate: float = 0.0,
         duplicate_person_rate: float = 0.0,
+        duplicate_variant_rate: float = 0.0,
     ) -> None:
         """The two real-world identity defects (problem catalog M2), injected
         on purpose so the Silver checks can be measured; both 0 by default:
         - `identity_collision_rate`: a new admission is a different person
           given an already-issued patient_id (two people, one id);
         - `duplicate_person_rate`: a new admission is a returning person
-          registered under a new patient_id and MRN (one person, two ids)."""
+          registered under a new patient_id and MRN (one person, two ids);
+        - `duplicate_variant_rate`: share of those duplicates registered with a
+          small difference - a one-letter typo or transposition in the name,
+          or day and month swapped - the cases exact matching misses.
+        Every injected case is listed in `injected_identity` (ground truth for
+        scoring the Silver checks; never part of the event stream)."""
         self.target_size = target_size
         self._rng = rng or random
         self.active: dict[str, ActiveEncounter] = {}  # keyed by encounter_id
@@ -76,6 +98,8 @@ class Population:
         self.duplicate_person_rate = duplicate_person_rate
         self.issued_people: list[PatientSnapshot] = []
         self.duplicate_people = 0
+        self.duplicate_variant_rate = duplicate_variant_rate
+        self.injected_identity: list[dict] = []
 
     def admit_new_patients(self, count: int, now: datetime) -> list[PatientEvent]:
         events: list[PatientEvent] = []
@@ -83,6 +107,7 @@ class Population:
             if self.issued_patient_ids and self._rng.random() < self.identity_collision_rate:
                 patient_id = self._rng.choice(self.issued_patient_ids)
                 self.identity_collisions += 1
+                self.injected_identity.append({"kind": "two_people_one_id", "patient_ids": [patient_id]})
             else:
                 patient_id = f"pt_{self._rng.getrandbits(32):08x}"
                 self.issued_patient_ids.append(patient_id)
@@ -92,7 +117,13 @@ class Population:
                 patient = replace(
                     patient, **{k: getattr(person, k) for k in ("full_name", "birth_date", "gender", "region")}
                 )
+                kind = "one_person_two_ids"
+                if self._rng.random() < self.duplicate_variant_rate:
+                    patient, kind = _vary(patient, self._rng), "one_person_two_ids_variant"
                 self.duplicate_people += 1
+                self.injected_identity.append(
+                    {"kind": kind, "patient_ids": sorted([person.patient_id, patient.patient_id])}
+                )
             else:
                 self.issued_people.append(patient)
             encounter_id = f"enc_{uuid.uuid4().hex[:8]}"

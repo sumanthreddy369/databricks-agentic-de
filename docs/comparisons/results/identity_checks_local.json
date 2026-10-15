@@ -1,0 +1,24 @@
+{
+  "source": "local DuckDB replica",
+  "two_people_one_id": {
+    "injected": 17,
+    "flagged": 17,
+    "false_flags": 0
+  },
+  "one_person_two_ids": {
+    "injected": 32,
+    "caught_by_exact_check": 32,
+    "caught_by_fuzzy_check": 0,
+    "caught_by_either": 32
+  },
+  "one_person_two_ids_variant": {
+    "injected": 16,
+    "caught_by_exact_check": 0,
+    "caught_by_fuzzy_check": 16,
+    "caught_by_either": 16
+  },
+  "false_duplicate_pairs": {
+    "exact_check": 0,
+    "fuzzy_check": 0
+  }
+}

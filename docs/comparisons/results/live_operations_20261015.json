@@ -1,0 +1,32 @@
+{
+  "workspace": "Databricks Free Edition",
+  "observed_on": "2026-10-14 / 2026-10-15",
+  "healthcheck_job": [
+    {
+      "run": "first run with the rules planner (serverless, no model key, no stored token)",
+      "findings": 3,
+      "actions": "paged for M2 identity problems (L1); quarantine of dropped vitals queued for approval (B1, L2)",
+      "exit_code": 2,
+      "databricks_result": "FAILED (by design: the failure email is the alert)"
+    },
+    {
+      "run": "next run, same problems",
+      "findings": 3,
+      "actions": "recognised as already alerted / already waiting for approval",
+      "exit_code": 0,
+      "databricks_result": "SUCCESS"
+    }
+  ],
+  "live_restart": {
+    "requested_by": "the agent (restart_pipeline), queued for approval",
+    "approved_with": "python -m agent.approvals approve --by <name>",
+    "pipelines_api": "POST /api/2.0/pipelines/{id}/updates",
+    "update_state": "COMPLETED",
+    "audit_lines": ["request: pending_approval", "execution: ok, approved_by recorded"]
+  },
+  "bugs_found_only_live": [
+    "MCP tool server didn't receive DATABRICKS_* settings: live checks read the local state file and reported healthy",
+    "Unity Catalog volumes reject append mode: every audit write failed (Illegal seek)",
+    "Serverless wheel tasks report even SystemExit(0) as a failed run"
+  ]
+}

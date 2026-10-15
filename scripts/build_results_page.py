@@ -83,7 +83,7 @@ def pipeline() -> list[str]:
         "Counts are from the latest pipeline update only.",
         "",
     ]
-    m, ident = snap["masks"], snap["identity_check"]
+    m = snap["masks"]
     out += _table(
         ["Check", "Result"],
         [
@@ -91,13 +91,39 @@ def pipeline() -> list[str]:
                 "Names / MRNs masked in gold.dim_patients",
                 f"{m['names_masked']:,} / {m['mrns_masked']:,} of {m['patients']:,}",
             ],
+        ],
+    )
+    scored = _load(RESULTS / "identity_checks_workspace.json")
+    two, exact, near = (
+        scored["two_people_one_id"],
+        scored["one_person_two_ids"],
+        scored["one_person_two_ids_variant"],
+    )
+    false_pairs = scored["false_duplicate_pairs"]
+    out += [
+        "**Identity checks (catalog M2) scored against the simulator's ground truth** "
+        "(`scripts/score_identity_checks.py`, flags read from the Silver tables on the workspace):",
+        "",
+    ]
+    out += _table(
+        ["Injected problem", "Injected", "Exact check", "Fuzzy check", "Caught", "False alarms"],
+        [
+            ["Two people on one patient_id", two["injected"], "-", "-", two["flagged"], two["false_flags"]],
             [
-                "patient_ids flagged as two people on one id",
-                f"{ident['flagged_two_people_one_id']} (16 injected)",
+                "One person, two patient_ids (same details)",
+                exact["injected"],
+                exact["caught_by_exact_check"],
+                exact["caught_by_fuzzy_check"],
+                exact["caught_by_either"],
+                f"{false_pairs['exact_check']} (exact check)",
             ],
             [
-                "People flagged under more than one patient_id",
-                f"{ident.get('duplicate_person_candidate_groups', '-')} candidate groups (27 injected)",
+                "One person, two patient_ids (name typo or day/month swapped)",
+                near["injected"],
+                near["caught_by_exact_check"],
+                near["caught_by_fuzzy_check"],
+                near["caught_by_either"],
+                f"{false_pairs['fuzzy_check']} (fuzzy check)",
             ],
         ],
     )
@@ -318,10 +344,11 @@ def detectors() -> list[str]:
     if "landed_stream" in r:
         ls = r["landed_stream"]
         out += [
-            f"On the {ls['panels']:,} panels of the landed stream (the uniform data now on Databricks): "
+            f"On the {ls['panels']:,} panels of the original uniform stream (data/landing, the first dataset "
+            "on Databricks): "
             + ", ".join(f"{names[k]} {_pct(v)}" for k, v in ls["flag_rate"].items())
-            + ". Those vitals aren't physiological, so clinical detectors fire constantly on them; the stream "
-            "needs regenerating with the new simulator.",
+            + ". Those vitals aren't physiological, so clinical detectors fire constantly on them - one reason the "
+            "Databricks data was regenerated with the physiology simulator.",
             "",
         ]
     return out + [
@@ -361,11 +388,42 @@ def stacks() -> list[str]:
         if (REPO / "docs" / "images" / "stack" / file).exists():
             out += [f"### {title}", "", caption, "", f"![{title}](images/stack/{file})", ""]
     out += [
-        "Databricks workspace screenshots (pipeline graph, Genie, Unity Catalog masks) are pending a fresh "
-        "workspace login.",
+        "Databricks itself is shown by the lineage diagram in section 1, built from the workspace's own tables "
+        "and event log: the Databricks console asks not to be driven by automated browsers, and screenshots of it "
+        "would show account details.",
         "",
     ]
     return out
+
+
+def live_operations() -> list[str]:
+    ops = _load(sorted(RESULTS.glob("live_operations_*.json"))[-1])
+    out = [
+        "## 6. Live operations on Databricks",
+        "",
+        "The scheduled health check runs as a serverless job with the deterministic rules planner (no model key, "
+        "no stored token); a restart goes through the approval gate.",
+        "",
+    ]
+    out += _table(
+        ["Health-check run", "Findings", "What it did", "Exit", "Databricks result"],
+        [
+            [r["run"], r["findings"], r["actions"], r["exit_code"], r["databricks_result"]]
+            for r in ops["healthcheck_job"]
+        ],
+    )
+    restart = ops["live_restart"]
+    out += [
+        f"**Live restart:** requested by {restart['requested_by']}; approved with `{restart['approved_with']}`; "
+        f"executed through `{restart['pipelines_api']}`; the update reached **{restart['update_state']}**; audit: "
+        + "; ".join(restart["audit_lines"])
+        + ".",
+        "",
+        "**Bugs only the live runs exposed** (each fixed, with a regression test):",
+        "",
+    ]
+    out += [f"- {b}" for b in ops["bugs_found_only_live"]]
+    return out + [""]
 
 
 def build() -> str:
@@ -376,7 +434,7 @@ def build() -> str:
         "the saved reports. Synthetic data throughout; nothing here describes real patients.",
         "",
     ]
-    for section in (pipeline, golden, eda, detectors, stacks):
+    for section in (pipeline, golden, eda, detectors, stacks, live_operations):
         lines += section()
     return "\n".join(lines).rstrip() + "\n"
 

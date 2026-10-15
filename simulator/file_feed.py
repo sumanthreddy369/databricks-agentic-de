@@ -19,6 +19,7 @@ before now (no future timestamps for the pipeline's clock-skew checks) and a
 Files are written locally; uploading them is a separate, explicit step.
 """
 
+import json
 import random
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -103,6 +104,9 @@ def run(
     duplicate_person_rate: float = typer.Option(
         0.0, help="Share of admissions that are a returning person under a new patient_id and MRN (catalog M2)."
     ),
+    duplicate_variant_rate: float = typer.Option(
+        0.0, help="Share of those duplicates registered with a name typo or swapped day/month."
+    ),
 ) -> None:
     if seed >= 0:
         random.seed(seed)
@@ -111,6 +115,7 @@ def run(
         rng=random.Random(seed) if seed >= 0 else None,
         identity_collision_rate=identity_collision_rate,
         duplicate_person_rate=duplicate_person_rate,
+        duplicate_variant_rate=duplicate_variant_rate,
     )
     files = generate_files(
         Path(output_dir),
@@ -128,6 +133,12 @@ def run(
         )
     if population.duplicate_people:
         console.print(f"Injected {population.duplicate_people} duplicate people (one person, two patient_ids)")
+    if population.injected_identity:
+        # Ground truth for scoring the identity checks - beside the feed, never
+        # inside it (Autoloader reads every file in the feed directory).
+        manifest = Path(output_dir).parent / f"{Path(output_dir).name}_injected_identity.json"
+        manifest.write_text(json.dumps(population.injected_identity, indent=1), encoding="utf-8")
+        console.print(f"Ground truth: {manifest}")
 
 
 if __name__ == "__main__":

@@ -187,3 +187,48 @@ def silver_patient_duplicate_candidates():
         )
         .filter("patient_ids > 1")
     )
+
+
+@dlt.table(
+    name="silver_patient_fuzzy_duplicate_candidates",
+    comment=(
+        "Data-quality check (problem catalog M2): one person under two patient_ids whose registrations differ "
+        "slightly - a name within 2 edits (typo, transposition) with the same birth date, or the same name "
+        "with day and month swapped. Exact matches are in silver_patient_duplicate_candidates. Pairs of "
+        "patient_ids only, no names; candidates for a data steward, never merged automatically."
+    ),
+)
+@dlt.expect("no_near_duplicate_registration", "name_edit_distance > 2")
+def silver_patient_fuzzy_duplicate_candidates():
+    people = (
+        dlt.read("silver_patient_admissions")
+        .select("patient_id", F.lower("full_name").alias("name"), "birth_date", "gender")
+        .dropDuplicates()
+        # Blocking key: gender, birth year and the unordered day/month pair, so a
+        # swapped day and month still lands in the same block (an equi-join).
+        .withColumn(
+            "block",
+            F.concat_ws(
+                "|",
+                "gender",
+                F.substring("birth_date", 1, 4),
+                F.array_join(
+                    F.array_sort(F.array(F.substring("birth_date", 6, 2), F.substring("birth_date", 9, 2))), "-"
+                ),
+            ),
+        )
+    )
+    a, b = people.alias("a"), people.alias("b")
+    pairs = a.join(b, (F.col("a.block") == F.col("b.block")) & (F.col("a.patient_id") < F.col("b.patient_id")))
+    distance = F.levenshtein(F.col("a.name"), F.col("b.name"))
+    same_date = F.col("a.birth_date") == F.col("b.birth_date")
+    return (
+        pairs.select(
+            F.col("a.patient_id").alias("patient_id_a"),
+            F.col("b.patient_id").alias("patient_id_b"),
+            distance.alias("name_edit_distance"),
+            F.when(same_date, F.lit("same")).otherwise(F.lit("day and month swapped")).alias("birth_date_match"),
+        )
+        # Near, not exact: exact name + birth date pairs are the other check's.
+        .filter("name_edit_distance <= 2 AND NOT (name_edit_distance = 0 AND birth_date_match = 'same')")
+    )

@@ -296,3 +296,12 @@ def test_duplicate_people_are_flagged_from_the_same_admissions(pipelines):
     check = graph.datasets["silver_patient_duplicate_candidates"]
     assert check.expectations == {"one_patient_id_per_person": "warn"}
     assert check.reads == ["silver_patient_admissions"]
+
+
+def test_near_duplicate_people_are_flagged_from_the_same_admissions(pipelines):
+    """Catalog M2, fuzzy: one person under two patient_ids with a name typo or
+    swapped day/month. Warn-only candidates, downstream of the contract gate."""
+    graph = pipelines["streaming_patient_pipeline"]
+    check = graph.datasets["silver_patient_fuzzy_duplicate_candidates"]
+    assert check.expectations == {"no_near_duplicate_registration": "warn"}
+    assert check.reads == ["silver_patient_admissions"]

@@ -52,6 +52,7 @@ select = ["E", "F", "I", "UP"]
 # Document content: one table row per line reads better than wrapped strings.
 "scripts/build_workflow_doc.py" = ["E501"]
 "scripts/build_results_page.py" = ["E501"]
+"scripts/score_identity_checks.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
