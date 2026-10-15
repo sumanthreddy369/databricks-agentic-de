@@ -1,8 +1,13 @@
 {
-  "measured_at": "2026-10-15T06:54:36Z",
+  "measured_at": "2026-10-15T07:08:57Z",
   "workspace": "free_edition",
   "note": "",
   "tables": [
+    {
+      "table": "gold.dim_patient_person",
+      "type": "MATERIALIZED_VIEW",
+      "rows": 1411
+    },
     {
       "table": "gold.dim_patients",
       "type": "MATERIALIZED_VIEW",
@@ -51,7 +56,7 @@
     {
       "table": "silver.event_log_cb164940_713d_4dc2_a929_98b8200fb0e5",
       "type": "MANAGED",
-      "rows": 890
+      "rows": 1110
     },
     {
       "table": "silver.raw_patient_events",
@@ -205,6 +210,8 @@
     "duplicate_person_candidate_groups": 28,
     "duplicate_person_patient_ids_involved": 57,
     "near_duplicate_pairs": 20,
-    "name_change_pairs": 16
+    "name_change_pairs": 16,
+    "people_after_steward_merge": 1347,
+    "patient_ids_merged_by_steward": 64
   }
 }

@@ -86,3 +86,53 @@ def test_queue_from_landed_files_lists_ids_and_reasons_only(tmp_path, capsys):
     text = json.dumps(queued)
     for snapshot in population.issued_people:
         assert snapshot.full_name not in text and snapshot.birth_date not in text
+
+
+def test_person_keys_join_chains_of_confirmed_pairs():
+    from common.identity import person_keys
+
+    keys = person_keys([("pt_c", "pt_b"), ("pt_b", "pt_a"), ("pt_x", "pt_y")])
+    assert keys == {"pt_a": "pt_a", "pt_b": "pt_a", "pt_c": "pt_a", "pt_x": "pt_x", "pt_y": "pt_x"}
+    assert person_keys([]) == {}
+
+
+class _FakeClient:
+    def __init__(self):
+        self.calls = []
+
+    def execute_statement(self, statement, parameters=None):
+        self.calls.append((statement, parameters))
+        return []
+
+
+def test_publish_binds_decisions_as_one_parameter():
+    state = {}
+    identity_review.decide(state, ["pt_0000000a", "pt_0000000b"], "same_person", "Robert'); DROP TABLE x; --")
+    client = _FakeClient()
+    assert identity_review.publish(state, client) == 1
+    statement, params = client.calls[0]
+    assert "DROP TABLE" not in statement and identity_review.DECISIONS_TABLE in statement
+    rows = json.loads(params[0]["value"])
+    assert rows[0]["patient_ids"] == "pt_0000000a,pt_0000000b" and rows[0]["decision"] == "same_person"
+
+
+def test_simulated_steward_decides_from_ground_truth():
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import simulate_steward
+
+    truth = [
+        {"kind": "one_person_two_ids", "patient_ids": ["pt_1", "pt_2"]},
+        {"kind": "one_person_two_ids", "patient_ids": ["pt_1", "pt_3"]},
+        {"kind": "two_people_one_id", "patient_ids": ["pt_9"]},
+    ]
+    candidates = [
+        {"check": "exact_duplicate", "patient_ids": ["pt_2", "pt_3"], "detail": ""},  # same person via pt_1
+        {"check": "exact_duplicate", "patient_ids": ["pt_4", "pt_5"], "detail": ""},  # chance match
+        {"check": "two_people_one_id", "patient_ids": ["pt_9"], "detail": ""},
+    ]
+    state = {}
+    assert simulate_steward.decide_all(candidates, truth, state) == {"same_person": 1, "different_people": 2}
+    assert all(d["by"] == simulate_steward.STEWARD for d in state["identity_decisions"].values())

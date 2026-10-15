@@ -268,7 +268,10 @@ def pipeline_lineage(snapshot_path: Path):
             4,
             1,
             "gold.dim_patients",
-            rows.get("dim_patients"),
+            # dim_patient_person: patient_ids a steward confirmed as one person share a key
+            f"{rows['dim_patients']:,} rows -> {people:,} people (dim_patient_person)"
+            if (people := snap.get("identity_check", {}).get("people_after_steward_merge"))
+            else rows.get("dim_patients"),
             [(f"names / MRNs masked: {snap['masks']['names_masked']:,} / {snap['masks']['mrns_masked']:,}", GOOD)],
         ),
         (

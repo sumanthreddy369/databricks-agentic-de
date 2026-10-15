@@ -1,0 +1,14 @@
+{
+  "workspace": "Databricks Free Edition",
+  "observed_on": "2026-10-15",
+  "feed": "v5 (identity_ground_truth_v5.json)",
+  "steward": "simulated from ground truth (scripts/simulate_steward.py) - 80 candidates: 65 same person, 15 different people",
+  "table": "healthcare_agentic_de.gold.dim_patient_person",
+  "patient_ids": 1411,
+  "people_after_merge": 1347,
+  "ids_merged": 64,
+  "expected_people": 1347,
+  "expected_ids_merged": 64,
+  "every_planted_id_has_its_persons_key": true,
+  "shared_ids_still_two_people": 14
+}

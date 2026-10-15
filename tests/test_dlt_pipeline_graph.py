@@ -314,3 +314,11 @@ def test_name_change_duplicates_are_flagged_from_the_same_admissions(pipelines):
     check = graph.datasets["silver_patient_name_change_candidates"]
     assert check.expectations == {"no_name_change_registration": "warn"}
     assert check.reads == ["silver_patient_admissions"]
+
+
+def test_person_map_is_built_from_patients_and_steward_decisions(pipelines):
+    """Catalog M2, closing the loop: confirmed duplicates share a person_key
+    in Gold; the decisions table is read as-is, not a pipeline dataset."""
+    graph = pipelines["streaming_patient_pipeline"]
+    person = graph.datasets["healthcare_agentic_de.gold.dim_patient_person"]
+    assert person.reads == ["silver_dim_patients"]

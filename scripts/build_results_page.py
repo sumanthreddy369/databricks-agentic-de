@@ -131,6 +131,17 @@ def pipeline() -> list[str]:
         "merged automatically).",
         "",
     ]
+    merge = _load(sorted(RESULTS.glob("identity_merge_*.json"))[-1])
+    out += [
+        f"**Closing the loop:** a steward decision on every candidate ({merge['steward']}), published to "
+        f"`ops.identity_decisions`; `{merge['table'].split('.', 1)[1]}` then gives confirmed ids one person_key. "
+        f"{merge['patient_ids']:,} patient_ids became **{merge['people_after_merge']:,} people** "
+        f"({merge['ids_merged']} ids merged; expected from the ground truth: {merge['expected_people']:,} and "
+        f"{merge['expected_ids_merged']}); every planted duplicate got its person's key: "
+        f"{'yes' if merge['every_planted_id_has_its_persons_key'] else 'no'}. The {merge['shared_ids_still_two_people']} "
+        "shared ids (two people on one id) stay flagged: splitting them needs the admissions re-assigned at source.",
+        "",
+    ]
     first = _load(RESULTS / "pipeline_run1_counts.json")
     out += [
         f"**GCP trial, {first['measured_at']}** (original uniform dataset; that workspace later locked sign-in):",

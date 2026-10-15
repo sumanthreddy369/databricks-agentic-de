@@ -800,7 +800,7 @@ layers:
     action: Report the conflicting patient_ids (counts and hashed keys, never names) to data stewards, who decide in the review queue (agent/identity_review.py); never merge or split records automatically.
     level: L1
     status: exists
-    status_note: 'Four Silver checks, scored on Databricks Free Edition against injected ground truth: two people on one id 14/14; one person under two ids 27/27 same details, 18/18 name typo or swapped day/month, 19/19 nickname or new surname; 1 pair raised that is two different people sharing a name and birth date. A steward decides each candidate in the review queue.'
+    status_note: 'Four Silver checks, scored on Databricks Free Edition against injected ground truth: two people on one id 14/14; one person under two ids 27/27 same details, 18/18 name typo or swapped day/month, 19/19 nickname or new surname; 1 pair raised that is two different people sharing a name and birth date. A steward decides each candidate in the review queue; confirmed duplicates share a person_key in gold.dim_patient_person (1,411 ids -> 1,347 people, matching ground truth).'
   - id: M3
     title: Orphan keys
     description: Encounters reference providers or units not in dim_providers because the roster lags.

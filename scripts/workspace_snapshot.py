@@ -46,9 +46,11 @@ def snapshot(client: DatabricksClient, pipeline_id: str) -> dict:
         "details:flow_progress.data_quality.expectations, "
         "'array<struct<name:string,dataset:string,passed_records:bigint,failed_records:bigint>>')) AS e "
         f"FROM event_log('{pipeline_id}') WHERE event_type = 'flow_progress' "
-        # Only the latest update: the event log keeps every run, and summing them double-counts.
+        # Only the latest full refresh: the event log keeps every run (summing them
+        # double-counts), and an incremental update only reports the flows it recomputed.
         f"AND origin.update_id = (SELECT origin.update_id FROM event_log('{pipeline_id}') "
-        "WHERE event_type = 'create_update' ORDER BY timestamp DESC LIMIT 1)) "
+        "WHERE event_type = 'create_update' AND details:create_update.full_refresh = 'true' "
+        "ORDER BY timestamp DESC LIMIT 1)) "
         "GROUP BY 1, 2 ORDER BY 1, 2 LIMIT 200"
     )
     masks = client.execute_statement(
@@ -74,6 +76,12 @@ def snapshot(client: DatabricksClient, pipeline_id: str) -> dict:
         f"SELECT count(*) AS pairs FROM {CATALOG}.silver.silver_patient_name_change_candidates LIMIT 1"
     )[0]
     identity["name_change_pairs"] = renamed["pairs"]
+    people = client.execute_statement(
+        f"SELECT count(DISTINCT person_key) AS people, count_if(steward_merged) AS merged "
+        f"FROM {CATALOG}.gold.dim_patient_person LIMIT 1"
+    )[0]
+    identity["people_after_steward_merge"] = people["people"]
+    identity["patient_ids_merged_by_steward"] = people["merged"]
     return {
         "tables": counts,
         "expectations": [

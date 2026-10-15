@@ -14,6 +14,12 @@ CREATE SCHEMA IF NOT EXISTS healthcare_agentic_de.gold;
 -- survive between runs on ephemeral job clusters. No table data lives here.
 CREATE SCHEMA IF NOT EXISTS healthcare_agentic_de.ops;
 CREATE VOLUME IF NOT EXISTS healthcare_agentic_de.ops.agent_state;
+-- Data-steward identity decisions (agent/identity_review.py publish replaces
+-- the contents). Created empty up front: gold.dim_patient_person reads it,
+-- and serverless pipelines can't check whether a table exists.
+CREATE TABLE IF NOT EXISTS healthcare_agentic_de.ops.identity_decisions (
+  patient_ids STRING, decision STRING, decided_by STRING, decided_at TIMESTAMP, note STRING
+) COMMENT 'Data-steward decisions on patient-identity candidates (agent/identity_review.py)';
 
 -- Service principal / role for the Kafka + Autoloader ingest jobs.
 CREATE GROUP IF NOT EXISTS ingest_svc;

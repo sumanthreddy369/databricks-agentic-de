@@ -28,3 +28,24 @@ def formal_first_name(first_name: str) -> str:
     """The formal first name for a nickname; any other name unchanged (lower case)."""
     first = first_name.lower()
     return FORMAL_FIRST_NAME.get(first, first)
+
+
+def person_keys(same_person_pairs) -> dict[str, str]:
+    """patient_id -> person_key for every id in a "same person" pair a data
+    steward confirmed: ids joined through any chain of confirmed pairs share
+    one key, the smallest patient_id among them (so the key is itself one of
+    the person's ids). Ids not in any pair aren't listed - their key is their
+    own id. A key can change when a later decision joins two groups."""
+    parent: dict[str, str] = {}
+
+    def root(x: str) -> str:
+        while parent.setdefault(x, x) != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for a, b in same_person_pairs:
+        ra, rb = root(a), root(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+    return {pid: root(pid) for pid in parent}

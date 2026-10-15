@@ -5,6 +5,7 @@ catalog M2). The Silver checks only flag; a person decides, here:
     uv run python -m agent.identity_review list
     uv run python -m agent.identity_review decide pt_0fbbc1b9,pt_c9acfc8e --same-person --by "Jane Doe"
     uv run python -m agent.identity_review decide pt_d919a719 --different-people --by "Jane Doe" --note "twins"
+    uv run python -m agent.identity_review publish
 
 Candidates come from the workspace's Silver tables (DATABRICKS_HOST,
 DATABRICKS_TOKEN, DATABRICKS_WAREHOUSE_ID), or with `--local DIR` from a
@@ -14,7 +15,9 @@ and the reason only - never names or birth dates.
 A decision is recorded in the state file (`identity_decisions`) and the
 audit log, and the pair leaves the queue. Nothing is merged or split here:
 "same person" is the input a master-patient-index merge needs; "different
-people" stops the pair being raised again. Like agent/approvals.py, this
+people" stops the pair being raised again. `publish` copies the decisions to
+healthcare_agentic_de.ops.identity_decisions, which the Gold table
+dim_patient_person reads to give confirmed ids one person_key. Like agent/approvals.py, this
 never calls a model and isn't exposed to the model as a tool; `--by` is a
 recorded name, not an authenticated identity.
 """
@@ -200,6 +203,40 @@ def summary(candidates: list[dict], state: dict) -> dict:
     return out
 
 
+DECISIONS_TABLE = f"{CATALOG}.ops.identity_decisions"
+_DECISION_TYPE = (
+    "array<struct<patient_ids:string,decision:string,decided_by:string,decided_at:string,note:string>>"
+)
+
+
+def publish(state: dict, client=None) -> int:
+    """Replace ops.identity_decisions with the state file's decisions (the
+    state file is the record; the table is a copy for the pipeline). One
+    bound JSON parameter - decision text never becomes SQL."""
+    if client is None:
+        from agent.databricks_client import DatabricksClient, load_config
+
+        client = DatabricksClient(load_config(), timeout=120)
+    rows = [
+        {
+            "patient_ids": key,
+            "decision": d["decision"],
+            "decided_by": d["by"],
+            "decided_at": d["at"],
+            "note": d["note"],
+        }
+        for key, d in sorted(state.get("identity_decisions", {}).items())
+    ]
+    client.execute_statement(
+        f"CREATE OR REPLACE TABLE {DECISIONS_TABLE} "
+        "COMMENT 'Data-steward decisions on patient-identity candidates (agent/identity_review.py)' AS "
+        "SELECT d.patient_ids, d.decision, d.decided_by, CAST(d.decided_at AS TIMESTAMP) AS decided_at, d.note "
+        f"FROM (SELECT explode(from_json(:decisions, '{_DECISION_TYPE}')) AS d)",
+        [{"name": "decisions", "value": json.dumps(rows), "type": "STRING"}],
+    )
+    return len(rows)
+
+
 def _append_audit(path: Path, entry: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(entry, default=str) + "\n"
@@ -221,6 +258,7 @@ def run(argv: list[str] | None = None, *, client=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("summary", help="candidates, pending and decided, per check")
     sub.add_parser("list", help="candidates waiting for a decision")
+    sub.add_parser("publish", help="copy the decisions to the workspace table the Gold person map reads")
     dec = sub.add_parser("decide", help="record a decision on one candidate")
     dec.add_argument("patient_ids", help="one patient_id, or two separated by a comma")
     choice = dec.add_mutually_exclusive_group(required=True)
@@ -252,6 +290,10 @@ def run(argv: list[str] | None = None, *, client=None) -> int:
             },
         )
         print(json.dumps(record))
+        return 0
+
+    if args.command == "publish":
+        print(json.dumps({"published": publish(state, client), "table": DECISIONS_TABLE}))
         return 0
 
     candidates = candidates_from_files(Path(args.local)) if args.local else candidates_from_workspace(client)
