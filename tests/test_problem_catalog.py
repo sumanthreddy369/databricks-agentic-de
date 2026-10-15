@@ -124,3 +124,52 @@ def test_expectation_and_table_names_match_their_problem():
     """Health checks report failures by identifier; the words inside it count."""
     query = "one_identity_per_patient_id expectation failing in silver_patient_identity_conflicts"
     assert search(query)[0]["id"] == "M2"
+
+
+# --- opt-in semantic ranking (RUNBOOK_SEARCH=embeddings) --------------------
+
+
+class _FakeIndex:
+    def __init__(self, hits=None, error=None):
+        self.hits, self.error = hits or [], error
+
+    def search(self, query, k):
+        if self.error:
+            raise self.error
+        return self.hits[:k]
+
+    def hybrid(self, query, k):
+        return [pid for pid, _ in self.hits][:k]
+
+
+def _lookup_with(monkeypatch, index, query="heart rate reads 999"):
+    import agent.tools.problem_catalog as pc
+
+    monkeypatch.setenv("RUNBOOK_SEARCH", "embeddings")
+    monkeypatch.setattr(pc, "_semantic_index", index)
+    return json.loads(pc.lookup_problem(query=query).content)
+
+
+def test_keyword_ranking_is_the_default(monkeypatch):
+    import agent.tools.problem_catalog as pc
+
+    monkeypatch.delenv("RUNBOOK_SEARCH", raising=False)
+    assert json.loads(pc.lookup_problem(query="sentinel values 999").content)["ranking"] == "keyword"
+
+
+def test_semantic_ranking_uses_the_fused_order(monkeypatch):
+    payload = _lookup_with(monkeypatch, _FakeIndex([("M4", 0.74), ("M5", 0.61), ("A1", 0.40)]))
+    assert payload["ranking"] == "embeddings"
+    assert [m["id"] for m in payload["matches"]] == ["M4", "M5", "A1"]
+
+
+def test_nothing_similar_enough_leaves_it_to_keyword_search(monkeypatch):
+    # Off-topic: embeddings below the floor and no keyword match -> no match, escalate.
+    payload = _lookup_with(monkeypatch, _FakeIndex([("A1", 0.46), ("B1", 0.41)]), query="recipe for bread")
+    assert payload["ranking"] == "keyword"
+    assert payload["matches"] == [] and "escalate" in payload["message"]
+
+
+def test_semantic_failure_falls_back_to_keyword(monkeypatch):
+    payload = _lookup_with(monkeypatch, _FakeIndex(error=ConnectionError("rate limited")), "sentinel values 999")
+    assert payload["ranking"] == "keyword" and payload["matches"]

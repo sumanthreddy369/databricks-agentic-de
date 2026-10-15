@@ -56,7 +56,7 @@ _CALL_TIMEOUT_SECONDS = 60.0
 # tools silently fell back to the local state file and a live health check
 # reported "healthy" while the pipeline was dropping rows. Found on the first
 # live run; tests/test_mcp_server_tools.py guards it.
-_FORWARDED_PREFIXES = ("DATABRICKS_", "GENIE_", "OTEL_", "GCP_", "LANGFUSE_", "ALERT_")
+_FORWARDED_PREFIXES = ("DATABRICKS_", "GENIE_", "OTEL_", "GCP_", "LANGFUSE_", "ALERT_", "RUNBOOK_")
 _FORWARDED_NAMES = ("PIPELINE_STATE_PATH", "AUDIT_LOG_PATH")
 
 

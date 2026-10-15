@@ -100,6 +100,12 @@ def run(argv: list[str] | None = None, *, agent: OrchestratorAgent | None = None
         help="Databricks secret scope/key holding the alert webhook URL (read with the run's own identity)",
     )
     args = parser.parse_args(argv)
+    if args.planner == "rules":
+        # The rules planner acts on lookup_problem's top match, so it keeps the
+        # deterministic keyword ranking: with semantic ranking on, the finding
+        # "plausible_vital_value failing in silver_vitals" ranked M4 (page)
+        # above B1 (approval-gated quarantine) in a live run.
+        os.environ.pop("RUNBOOK_SEARCH", None)
     if args.pipeline_ids:
         os.environ["DATABRICKS_PIPELINE_IDS"] = args.pipeline_ids
     if args.alert_webhook_secret and not os.environ.get("ALERT_WEBHOOK_URL"):

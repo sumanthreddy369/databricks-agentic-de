@@ -24,13 +24,32 @@ tool result.
 """
 
 import json
+import os
 import re
 from functools import lru_cache
 from pathlib import Path
 
+import structlog
 import yaml
 
 from agent.llm import ToolResult
+
+logger = structlog.get_logger(__name__)
+
+# Opt-in semantic ranking (RUNBOOK_SEARCH=embeddings): rank fusion of
+# Databricks-hosted embeddings over the runbook pages and this keyword search
+# (agent/runbook_search.py). On 15 held-out on-call questions it put the right
+# problem in the top 3 for 14 vs 10 for keyword search alone (docs/results.md
+# section 8). Fusion rather than embeddings alone: on a technical finding
+# ("plausible_vital_value failing in silver_vitals") embeddings missed B1
+# entirely, which the keyword match ranks first. Any failure falls back to
+# keyword search.
+#
+# Below this cosine similarity the best page isn't a match and keyword search
+# decides alone (so "no catalog match - escalate" still happens). Measured:
+# real on-call questions scored 0.59-0.76, five off-topic questions 0.37-0.50.
+SEMANTIC_MIN_SIMILARITY = 0.55
+_semantic_index = None
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "knowledge" / "problem_catalog.yaml"
 
@@ -196,7 +215,9 @@ def lookup_problem(
             tool_use_id="", content=json.dumps({"error": "give a query or a problem_id"}), is_error=True
         )
 
-    matches = search(query, limit=max(1, min(limit, 5)))
+    limit = max(1, min(limit, 5))
+    ranked = _semantic_search(query, limit)
+    matches = search(query, limit=limit) if ranked is None else ranked
     if not matches:
         payload = {
             "matches": [],
@@ -205,4 +226,30 @@ def lookup_problem(
         }
     else:
         payload = {"matches": [_render(p) for p in matches]}
+    payload["ranking"] = "keyword" if ranked is None else "embeddings"
     return ToolResult(tool_use_id="", content=json.dumps(payload))
+
+
+def _semantic_search(query: str, limit: int, index=None) -> list[dict] | None:
+    """Catalog problems ranked by embedding similarity, or None when semantic
+    ranking is off or unavailable (the caller then uses keyword search)."""
+    if index is None and os.environ.get("RUNBOOK_SEARCH") != "embeddings":
+        return None
+    global _semantic_index
+    try:
+        if index is None:
+            if _semantic_index is None:
+                from agent.runbook_search import CACHE_PATH, RunbookIndex, databricks_embedder, load_pages
+
+                profile = os.environ.get("RUNBOOK_SEARCH_PROFILE")
+                _semantic_index = RunbookIndex(load_pages(), databricks_embedder(profile), cache_path=CACHE_PATH)
+            index = _semantic_index
+        best = index.search(query, 1)
+        if not best or best[0][1] < SEMANTIC_MIN_SIMILARITY:
+            return None
+        ids = index.hybrid(query, limit)
+    except Exception as exc:  # network, auth, rate limit: keyword search still answers
+        logger.warning("semantic_lookup_unavailable", error_type=type(exc).__name__)
+        return None
+    by_id = {p["id"]: p for p in load_catalog()}
+    return [by_id[pid] for pid in ids if pid in by_id]

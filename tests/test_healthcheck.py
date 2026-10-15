@@ -149,3 +149,23 @@ def test_a_problem_still_exits_non_zero(monkeypatch):
     with pytest.raises(SystemExit) as exited:
         healthcheck.main()
     assert exited.value.code == healthcheck.EXIT_ESCALATED
+
+
+def test_rules_planner_keeps_keyword_ranking(tmp_path, capsys, monkeypatch):
+    """It acts on lookup_problem's top match; semantic ranking put M4 above B1
+    for an expectation failure in a live run, so it's switched off here."""
+    import os
+
+    monkeypatch.setenv("RUNBOOK_SEARCH", "embeddings")
+    healthcheck.run(
+        [
+            "--planner",
+            "rules",
+            "--state-path",
+            str(tmp_path / "s.json"),
+            "--audit-log-path",
+            str(tmp_path / "a.jsonl"),
+        ],
+        agent=_agent(tmp_path, _ScriptedClaude(tool_calls=[("check_job_status", {})])),
+    )
+    assert "RUNBOOK_SEARCH" not in os.environ
