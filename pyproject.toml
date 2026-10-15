@@ -53,6 +53,7 @@ select = ["E", "F", "I", "UP"]
 "scripts/build_workflow_doc.py" = ["E501"]
 "scripts/build_results_page.py" = ["E501"]
 "scripts/score_identity_checks.py" = ["E501"]
+"scripts/build_cicd_images.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
