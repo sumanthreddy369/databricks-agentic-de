@@ -30,22 +30,23 @@ uncontrolled access to patient data.** Concretely:
 **Status: in development.** The glue-and-guardrail layer, simulator, MCP
 tool layer and ML lifecycle run and are tested locally.
 
-**Running on Databricks (Free Edition, $0):** the project first ran on
-a GCP trial workspace. When that trial locked sign-in, it moved to
-Databricks Free Edition (`free` target in `databricks.yml`). It runs on
-the regenerated physiology data (103,407 events):
+## Results at a glance
 
-- **Pipeline:** every layer's count matches the local prediction.
-- **Masks:** Unity Catalog masks 1,359 of 1,359 names and MRNs in Gold.
-- **Identity check:** flags all 23 injected two-people-one-id cases.
-- **Event log:** shows 241 impossible vitals dropped and 23 identities
-  flagged.
+Measured on Databricks Free Edition ($0) and in CI. The data is simulated (no real patients), which is what makes
+the defects measurable: they're planted, and the ground truth is committed. Details and every run in
+[`docs/results.md`](docs/results.md).
 
-**Genie, measured:** a 27-question golden set has run three times. In run
-3 (Free Edition, live), Genie behind this project's guardrails scored
-27/27. Genie alone scored 26/27: it again reported a group of one patient,
-and the guard suppressed it. See [Results so far](#results-so-far) and
-every question in [`docs/results.md`](docs/results.md).
+| Area | Result |
+|---|---|
+| Pipeline | 103,359 simulated patient events through Bronze -> Silver -> Gold (Lakeflow, Auto Loader); 306 physically impossible vitals dropped by expectations |
+| PHI | Unity Catalog masks on 1,411 of 1,411 patient names and MRNs in Gold; masking repeated in code before any model sees a row |
+| Patient identity | Four Silver checks (exact, typo/swapped date, nickname/new surname, shared id) caught 78 of 78 planted cases, 1 false alarm (two real people sharing a name and birth date); a local DuckDB replica gives identical numbers |
+| Steward loop | Review queue + Gold person key: 1,411 patient_ids -> 1,347 people after (simulated) steward decisions - exactly the ground truth |
+| Agent planner | 14 behaviour-graded scenarios on 5 free Databricks-hosted models: Qwen 3.5 122B 14/14 (42/42 over three runs); the runs found 3 bugs, each fixed with a test |
+| Genie | 27-question golden set, live: Genie + guardrails 27/27 in run 3 (Genie alone 26/27, a group of one patient suppressed by the guard); 26/27 in run 4 (one Genie timeout) |
+| Deterioration | At NEWS2's 1.8% false-alarm rate, the calibrated ONNX model catches 61% of deteriorating panels vs NEWS2's 47% (simulated physiology only) |
+| Operations | Serverless health check alerts once per problem; a live pipeline restart ran only after a named approval; every action in the audit log |
+| CI/CD | GitHub Actions modeled on Databricks' bundle-examples: lint, guardrail tests, 500 tests, a pipeline integration gate that fails on any missed planted defect, docs-in-sync, bundle validate/deploy, SHA-pinned actions |
 
 **Health check, no AI needed:** the scheduled DE health check runs as a
 serverless job on Databricks Free Edition. A deterministic rules planner
@@ -347,7 +348,7 @@ databricks-agentic-de/
 │   ├── comparisons/                # Genie golden-set results (results/) + Agent Bricks / Vertex AI plans
 │   ├── flows/guardrails.md         # escalation ceiling, kill switch, audit trail, anomaly detection (this doc)
 │   └── restructure-proposal.md     # optional layout suggestions, not applied
-├── tests/                          # mocked Anthropic client, zero network calls, 453 tests
+├── tests/                          # mocked Anthropic client, zero network calls, 500 tests
 ├── .github/workflows/              # ci.yml (lint, guardrails, tests, integration), bundle.yml, workflow-lint.yml
 ├── docker-compose.yml              # local Redpanda broker + console
 ├── .env.example                    # local environment variable template
@@ -889,7 +890,7 @@ suite mocks this) and other optional configuration.
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
 | `uv run python -m agent.healthcheck [--planner rules\|claude] [--pipeline-ids JSON]` | One DE-mode health check; the rules planner is the default without `ANTHROPIC_API_KEY`. Exit 0 healthy, 1 agent unavailable, 2 escalated, 3 waiting for approval |
-| `uv run pytest` | Run the full test suite (453 tests, zero network calls) |
+| `uv run pytest` | Run the full test suite (500 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
 | `databricks bundle validate` | Validate the Asset Bundle against a real workspace (Databricks-only) |
@@ -1014,7 +1015,7 @@ live infrastructure, or pure planning with no implementation at all
 ## Testing
 
 ```bash
-uv run pytest            # full suite: 453 tests, ~55s, zero network calls
+uv run pytest            # full suite: 500 tests, ~2 min, zero network calls
 uv run pytest -q         # quiet output
 uv run pytest tests/test_masking_guard.py tests/test_prompt_injection_guard.py  # the two core guardrail proofs
 uv run ruff check .      # lint
