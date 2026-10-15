@@ -176,9 +176,9 @@ def test_health_check_job_is_never_retried():
     problems, succeeds, and the run ends green - the alert is lost (seen live
     on serverless, which retries unless told not to)."""
     workflows = yaml.safe_load((REPO_ROOT / "resources" / "workflows.yml").read_text())
-    tasks = [
-        task
-        for target in workflows["targets"].values()
-        for task in target.get("resources", {}).get("jobs", {}).get("agent_pipeline_healthcheck", {}).get("tasks", [])
-    ]
+    jobs = [target.get("resources", {}).get("jobs", {}) for target in workflows["targets"].values()]
+    tasks = [task for j in jobs for task in j.get("agent_pipeline_healthcheck", {}).get("tasks", [])]
     assert tasks and all(t["max_retries"] == 0 for t in tasks)
+    # Serverless retries on its own unless auto-optimization is off (max_retries alone wasn't enough).
+    serverless = [t for t in tasks if "environment_key" in t]
+    assert serverless and all(t["disable_auto_optimization"] is True for t in serverless)
