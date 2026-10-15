@@ -1,0 +1,34 @@
+# Held-out questions: written after run 2's method was fixed and never used
+# to tune it, so they measure it without the advantage the main set gives.
+# Different problems from questions.yaml where possible.
+questions:
+  - q: The Kafka consumer says the offsets it wanted were already deleted.
+    expect: [A6]
+  - q: The provider roster file hasn't changed in three days.
+    expect: [A8]
+  - q: Encounter rows keep flipping back to an older status after updates.
+    expect: [B4]
+  - q: Silver has fewer rows than Bronze for the same hour and no expectation dropped anything.
+    expect: [B8]
+  - q: The pipeline's DBU spend tripled this week.
+    expect: [B9, J1]
+  - q: A nurse can see encounters from units she isn't assigned to.
+    expect: [C7]
+  - q: Prod has a job setting that isn't in the repo.
+    expect: [D2, N1]
+  - q: The agent keeps paging on-call every few minutes about the same thing.
+    expect: [D5, E2]
+  - q: Revenue per bed doubled after we joined encounters to transfers.
+    expect: [F3, O2]
+  - q: The census number on the dashboard is from yesterday but labelled live.
+    expect: [F4]
+  - q: Every table is thousands of tiny files and queries crawl.
+    expect: [G3]
+  - q: Somebody changed a Gold table last night - how do I see what changed?
+    expect: [G5]
+  - q: After the broker came back, everything that queued up hit the pipeline at once.
+    expect: [K8, J1]
+  - q: Shift totals are off by an hour on the night the clocks changed.
+    expect: [L4, F7]
+  - q: A test patient named "Test Testerson" showed up in the Gold table.
+    expect: [M6]

@@ -496,6 +496,60 @@ def scenario_evals() -> list[str]:
     return out
 
 
+def runbook_search() -> list[str]:
+    runs = sorted(RESULTS.glob("runbook_eval_*.json"))
+    if not runs:
+        return []
+    labels = {
+        "keyword_lookup": "Keyword lookup (lookup_problem, the agent's tool today)",
+        "embedding_search": "Embedding search",
+        "hybrid_search": "Hybrid (rank fusion of keyword + embedding)",
+        "embedding_plus_model": "Embedding search + hosted model answer",
+        "hybrid_plus_model": "Hybrid + hosted model answer",
+    }
+    out = [
+        "## 8. Which runbook applies? Keyword vs embeddings vs a model",
+        "",
+        "30 on-call questions in plain words (`evals/runbook/questions.yaml`) against 104 runbook pages generated "
+        "from the problem catalog (`docs/runbooks/`). Agent Bricks' Knowledge Assistant would be the managed "
+        "option, but new accounts can no longer create one (legacy), so retrieval and answer use Databricks-hosted "
+        "models directly (`agent/runbook_search.py`): `databricks-gte-large-en` embeddings and a chat model. "
+        "Right = the top result (or the answer's `Problem <ID>:`) is an expected ID.",
+        "",
+    ]
+    order = {"run1": 0, "": 1, "holdout": 2}
+    runs.sort(key=lambda p: order.get(p.stem.split("_", 3)[-1] if p.stem.count("_") >= 3 else "", 1))
+    for path in runs:
+        report = _load(path)
+        n = report["questions"]
+        if path.stem.endswith("run1"):
+            name = "Run 1: whole pages embedded, top 3 to the model"
+        elif path.stem.endswith("holdout"):
+            name = (
+                f"Run 2's method on {n} held-out questions (`evals/runbook/holdout.yaml`, never used for tuning)"
+            )
+        else:
+            name = "Run 2: substance of each page embedded, hybrid retrieval, top 5 to the model"
+        out += [f"**{name}** (answer model: `{report.get('answer_endpoint')}`)", ""]
+        out += _table(
+            ["Method", "Right first", "Right in top 3"],
+            [
+                [labels.get(k, k), f"{v['top1']}/{n}", f"{v['top3']}/{n}" if "top3" in v else "-"]
+                for k, v in report["summary"].items()
+            ],
+        )
+    out += [
+        "Run 2's changes are general retrieval practice, chosen from run 1's misses, not per question: the "
+        "headings and autonomy/status text shared by every page were blurring the embeddings, and keyword and "
+        "embedding search each found pages the other missed. Runs 1 and 2 use the same 30 questions, so run 2 is "
+        "tuned on them; the held-out set measures it without that advantage. Hybrid ranking on its own can rank "
+        "worse than embeddings alone (it does on the held-out set: the weaker keyword list pulls near-misses up); "
+        "its value is the wider set of candidate pages it hands the model, which then picks the right one.",
+        "",
+    ]
+    return out
+
+
 def build() -> str:
     lines = [
         "# Results",
@@ -504,7 +558,7 @@ def build() -> str:
         "the saved reports. Synthetic data throughout; nothing here describes real patients.",
         "",
     ]
-    for section in (pipeline, golden, eda, detectors, stacks, live_operations, scenario_evals):
+    for section in (pipeline, golden, eda, detectors, stacks, live_operations, scenario_evals, runbook_search):
         lines += section()
     return "\n".join(lines).rstrip() + "\n"
 

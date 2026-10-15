@@ -124,3 +124,5 @@ jobs:
         run: uv run python scripts/build_results_page.py
       - name: Fail if it differs from the committed page
         run: git diff --exit-code -- docs/results.md
+      - name: Runbook pages match the problem catalog
+        run: uv run python scripts/build_runbooks.py --check

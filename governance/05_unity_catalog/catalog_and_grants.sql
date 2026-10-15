@@ -14,6 +14,10 @@ CREATE SCHEMA IF NOT EXISTS healthcare_agentic_de.gold;
 -- survive between runs on ephemeral job clusters. No table data lives here.
 CREATE SCHEMA IF NOT EXISTS healthcare_agentic_de.ops;
 CREATE VOLUME IF NOT EXISTS healthcare_agentic_de.ops.agent_state;
+-- Runbook pages (docs/runbooks/, generated from the problem catalog): the
+-- documents behind the Agent Bricks Knowledge Assistant
+-- (scripts/runbook_assistant.py). No patient data.
+CREATE VOLUME IF NOT EXISTS healthcare_agentic_de.ops.runbooks;
 -- Data-steward identity decisions (agent/identity_review.py publish replaces
 -- the contents). Created empty up front: gold.dim_patient_person reads it,
 -- and serverless pipelines can't check whether a table exists.

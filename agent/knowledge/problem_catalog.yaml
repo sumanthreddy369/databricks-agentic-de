@@ -111,7 +111,7 @@ layers:
     action: Find the segment (unit, device, itemid); quarantine only if the cause is bounded; otherwise escalate.
     level: L2
     status: exists
-    status_note: check_expectation_metrics (local + live, live tested against mocks only)
+    status_note: check_expectation_metrics (local + live; run against Databricks Free Edition) and quarantine_bad_records behind the approval gate
   - id: B2
     title: Hard-stop contract break
     description: Unknown event_type fails the whole pipeline (expect_or_fail).

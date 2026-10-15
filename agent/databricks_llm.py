@@ -100,8 +100,10 @@ class DatabricksModel:
 
     @tenacity.retry(
         retry=tenacity.retry_if_exception_type((_Retryable, httpx.TransportError)),
-        stop=tenacity.stop_after_attempt(4),
-        wait=tenacity.wait_exponential(multiplier=1, max=20),
+        # Free Edition rate-limits bursts (429s for over a minute seen during
+        # evaluations), so back off for up to a minute before giving up.
+        stop=tenacity.stop_after_attempt(6),
+        wait=tenacity.wait_exponential(multiplier=2, max=60),
         reraise=True,
     )
     def _chat(self, messages: list[dict], tools: list[dict]) -> dict:

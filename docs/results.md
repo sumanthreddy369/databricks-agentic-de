@@ -268,3 +268,35 @@ The 14 scenario evals (`evals/scenarios.yaml`) grade what the agent *does* - too
 | **Passed** | **10/14** | **10/14** | **12/14** | **11/14** | **14/14** (42/42 runs) |
 
 A scenario passes for a model only if every run passed. Fixes these runs led to: a tool argument of the wrong JSON type crashed the request instead of returning a tool error; objects sent as JSON strings are now decoded where the tool's schema says object; pages forced by the kill switch or escalation ceiling were sent but missing from the audit log; three scenarios required `aggregate_gold_table` by name although the prompt prefers `compute_metric` (which runs through it). The health check's hosted-model planner defaults to the best scorer.
+
+## 8. Which runbook applies? Keyword vs embeddings vs a model
+
+30 on-call questions in plain words (`evals/runbook/questions.yaml`) against 104 runbook pages generated from the problem catalog (`docs/runbooks/`). Agent Bricks' Knowledge Assistant would be the managed option, but new accounts can no longer create one (legacy), so retrieval and answer use Databricks-hosted models directly (`agent/runbook_search.py`): `databricks-gte-large-en` embeddings and a chat model. Right = the top result (or the answer's `Problem <ID>:`) is an expected ID.
+
+**Run 1: whole pages embedded, top 3 to the model** (answer model: `databricks-qwen35-122b-a10b`)
+
+| Method | Right first | Right in top 3 |
+|---|---|---|
+| Keyword lookup (lookup_problem, the agent's tool today) | 16/30 | 19/30 |
+| Embedding search | 12/30 | 25/30 |
+| Embedding search + hosted model answer | 24/30 | - |
+
+**Run 2: substance of each page embedded, hybrid retrieval, top 5 to the model** (answer model: `databricks-qwen35-122b-a10b`)
+
+| Method | Right first | Right in top 3 |
+|---|---|---|
+| Keyword lookup (lookup_problem, the agent's tool today) | 16/30 | 19/30 |
+| Embedding search | 17/30 | 24/30 |
+| Hybrid (rank fusion of keyword + embedding) | 16/30 | 24/30 |
+| Hybrid + hosted model answer | 25/30 | - |
+
+**Run 2's method on 15 held-out questions (`evals/runbook/holdout.yaml`, never used for tuning)** (answer model: `databricks-qwen35-122b-a10b`)
+
+| Method | Right first | Right in top 3 |
+|---|---|---|
+| Keyword lookup (lookup_problem, the agent's tool today) | 6/15 | 10/15 |
+| Embedding search | 12/15 | 14/15 |
+| Hybrid (rank fusion of keyword + embedding) | 9/15 | 14/15 |
+| Hybrid + hosted model answer | 14/15 | - |
+
+Run 2's changes are general retrieval practice, chosen from run 1's misses, not per question: the headings and autonomy/status text shared by every page were blurring the embeddings, and keyword and embedding search each found pages the other missed. Runs 1 and 2 use the same 30 questions, so run 2 is tuned on them; the held-out set measures it without that advantage. Hybrid ranking on its own can rank worse than embeddings alone (it does on the held-out set: the weaker keyword list pulls near-misses up); its value is the wider set of candidate pages it hands the model, which then picks the right one.

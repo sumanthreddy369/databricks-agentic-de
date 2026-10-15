@@ -1,0 +1,363 @@
+{
+  "questions": 15,
+  "summary": {
+    "keyword_lookup": {
+      "top1": 6,
+      "top3": 10
+    },
+    "embedding_search": {
+      "top1": 12,
+      "top3": 14
+    },
+    "hybrid_search": {
+      "top1": 9,
+      "top3": 14
+    },
+    "hybrid_plus_model": {
+      "top1": 14
+    }
+  },
+  "rows": [
+    {
+      "q": "The Kafka consumer says the offsets it wanted were already deleted.",
+      "expect": [
+        "A6"
+      ],
+      "keyword_top3": [
+        "A6",
+        "A1",
+        "J3"
+      ],
+      "embedding_top3": [
+        "A6",
+        "D5",
+        "B7"
+      ],
+      "hybrid_top3": [
+        "A6",
+        "J3",
+        "K1"
+      ],
+      "answer_cites": "A6"
+    },
+    {
+      "q": "The provider roster file hasn't changed in three days.",
+      "expect": [
+        "A8"
+      ],
+      "keyword_top3": [
+        "A8",
+        "M3",
+        "N4"
+      ],
+      "embedding_top3": [
+        "A8",
+        "M3",
+        "C7"
+      ],
+      "hybrid_top3": [
+        "A8",
+        "M3",
+        "B4"
+      ],
+      "answer_cites": "A8"
+    },
+    {
+      "q": "Encounter rows keep flipping back to an older status after updates.",
+      "expect": [
+        "B4"
+      ],
+      "keyword_top3": [
+        "L6",
+        "O2",
+        "O4"
+      ],
+      "embedding_top3": [
+        "B4",
+        "O4",
+        "B8"
+      ],
+      "hybrid_top3": [
+        "O4",
+        "B4",
+        "H2"
+      ],
+      "answer_cites": "B4"
+    },
+    {
+      "q": "Silver has fewer rows than Bronze for the same hour and no expectation dropped anything.",
+      "expect": [
+        "B8"
+      ],
+      "keyword_top3": [
+        "B8",
+        "L7",
+        "M2"
+      ],
+      "embedding_top3": [
+        "B8",
+        "O5",
+        "B7"
+      ],
+      "hybrid_top3": [
+        "B8",
+        "A5",
+        "M5"
+      ],
+      "answer_cites": "B8"
+    },
+    {
+      "q": "The pipeline's DBU spend tripled this week.",
+      "expect": [
+        "B9",
+        "J1"
+      ],
+      "keyword_top3": [
+        "N4",
+        "B3",
+        "K1"
+      ],
+      "embedding_top3": [
+        "B9",
+        "J1",
+        "N4"
+      ],
+      "hybrid_top3": [
+        "N4",
+        "B3",
+        "B9"
+      ],
+      "answer_cites": "B9"
+    },
+    {
+      "q": "A nurse can see encounters from units she isn't assigned to.",
+      "expect": [
+        "C7"
+      ],
+      "keyword_top3": [
+        "L6",
+        "M1",
+        "B7"
+      ],
+      "embedding_top3": [
+        "C7",
+        "L6",
+        "C4"
+      ],
+      "hybrid_top3": [
+        "L6",
+        "C4",
+        "C7"
+      ],
+      "answer_cites": "C7"
+    },
+    {
+      "q": "Prod has a job setting that isn't in the repo.",
+      "expect": [
+        "D2",
+        "N1"
+      ],
+      "keyword_top3": [
+        "N1",
+        "D1",
+        "C4"
+      ],
+      "embedding_top3": [
+        "N6",
+        "D2",
+        "D4"
+      ],
+      "hybrid_top3": [
+        "N1",
+        "D2",
+        "D1"
+      ],
+      "answer_cites": "D2"
+    },
+    {
+      "q": "The agent keeps paging on-call every few minutes about the same thing.",
+      "expect": [
+        "D5",
+        "E2"
+      ],
+      "keyword_top3": [
+        "H1",
+        "D5",
+        "G1"
+      ],
+      "embedding_top3": [
+        "D5",
+        "J6",
+        "M5"
+      ],
+      "hybrid_top3": [
+        "D5",
+        "D4",
+        "J6"
+      ],
+      "answer_cites": "D5"
+    },
+    {
+      "q": "Revenue per bed doubled after we joined encounters to transfers.",
+      "expect": [
+        "F3",
+        "O2"
+      ],
+      "keyword_top3": [
+        "L6",
+        "J7",
+        "O2"
+      ],
+      "embedding_top3": [
+        "L6",
+        "F3",
+        "J1"
+      ],
+      "hybrid_top3": [
+        "L6",
+        "F3",
+        "O4"
+      ],
+      "answer_cites": "F3"
+    },
+    {
+      "q": "The census number on the dashboard is from yesterday but labelled live.",
+      "expect": [
+        "F4"
+      ],
+      "keyword_top3": [
+        "F2",
+        "H3",
+        "O5"
+      ],
+      "embedding_top3": [
+        "L8",
+        "O5",
+        "N5"
+      ],
+      "hybrid_top3": [
+        "O5",
+        "O6",
+        "B7"
+      ],
+      "answer_cites": "B7"
+    },
+    {
+      "q": "Every table is thousands of tiny files and queries crawl.",
+      "expect": [
+        "G3"
+      ],
+      "keyword_top3": [
+        "G3",
+        "O4",
+        "N8"
+      ],
+      "embedding_top3": [
+        "G3",
+        "F5",
+        "F3"
+      ],
+      "hybrid_top3": [
+        "G3",
+        "F4",
+        "G2"
+      ],
+      "answer_cites": "G3"
+    },
+    {
+      "q": "Somebody changed a Gold table last night - how do I see what changed?",
+      "expect": [
+        "G5"
+      ],
+      "keyword_top3": [
+        "N8",
+        "B7",
+        "N4"
+      ],
+      "embedding_top3": [
+        "G5",
+        "N8",
+        "O5"
+      ],
+      "hybrid_top3": [
+        "N8",
+        "G5",
+        "C1"
+      ],
+      "answer_cites": "G5"
+    },
+    {
+      "q": "After the broker came back, everything that queued up hit the pipeline at once.",
+      "expect": [
+        "J1",
+        "K8"
+      ],
+      "keyword_top3": [
+        "K8",
+        "K1",
+        "N3"
+      ],
+      "embedding_top3": [
+        "K8",
+        "J1",
+        "D5"
+      ],
+      "hybrid_top3": [
+        "K8",
+        "K1",
+        "J6"
+      ],
+      "answer_cites": "K8"
+    },
+    {
+      "q": "Shift totals are off by an hour on the night the clocks changed.",
+      "expect": [
+        "F7",
+        "L4"
+      ],
+      "keyword_top3": [
+        "L1",
+        "F7",
+        "N4"
+      ],
+      "embedding_top3": [
+        "L4",
+        "F7",
+        "L3"
+      ],
+      "hybrid_top3": [
+        "F7",
+        "L1",
+        "L4"
+      ],
+      "answer_cites": "L4"
+    },
+    {
+      "q": "A test patient named \"Test Testerson\" showed up in the Gold table.",
+      "expect": [
+        "M6"
+      ],
+      "keyword_top3": [
+        "N8",
+        "M6",
+        "J7"
+      ],
+      "embedding_top3": [
+        "M6",
+        "C7",
+        "B7"
+      ],
+      "hybrid_top3": [
+        "M6",
+        "N8",
+        "B7"
+      ],
+      "answer_cites": "M6"
+    }
+  ],
+  "embedding_endpoint": "databricks-gte-large-en",
+  "answer_endpoint": "databricks-qwen35-122b-a10b",
+  "runbooks": 104,
+  "workspace": "Databricks Free Edition",
+  "question_file": "holdout.yaml"
+}
