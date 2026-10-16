@@ -1,4 +1,4 @@
-"""Databricks-only DLT bronze step. Not executed in this environment.
+"""Lakeflow (DLT) bronze step; runs on Databricks (Free Edition, `free` bundle target).
 
 Bronze flattens the parsed payload struct and stamps an ingestion time, but
 never rejects a row — even a malformed/corrupt record is retained (with

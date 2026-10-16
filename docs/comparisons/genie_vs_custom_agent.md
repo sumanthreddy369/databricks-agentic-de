@@ -38,7 +38,7 @@ what would justify trusting Genie with more.
 | Ability to unit-test | Can the guardrails be proven in a CI pipeline with zero live workspace, zero network calls? | This project's own `tests/test_masking_guard.py`/`test_prompt_injection_guard.py` pattern attempted against Genie (likely: no, Genie is workspace-hosted and not something you can drive from a mocked local test) |
 | Vendor lock-in | How much of the implementation is portable to a non-Databricks lakehouse | Genie: fully Databricks-proprietary. Custom agent: the Claude tool-loop, masking, and injection-defense code is platform-agnostic (already proven by this project's DuckDB local stand-in for a real Gold connection) |
 
-## Status: answers, governance and latency measured; cost not yet
+## What was measured: answers, governance and latency
 
 Measured on 2026-10-14 with the golden question set (`evals/golden/`, 27
 questions). Reports: [`results/`](results/).

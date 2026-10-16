@@ -1,6 +1,6 @@
--- Databricks-only Unity Catalog DDL. Not executed against a real workspace in
--- this environment — structurally correct SQL to run once a metastore-enabled
--- workspace exists.
+-- Unity Catalog DDL. scripts/setup_workspace.py runs it statement by statement
+-- (it ran on Databricks Free Edition); group creation and grants are held back
+-- unless --with-groups, since they change account security.
 
 CREATE CATALOG IF NOT EXISTS healthcare_agentic_de;
 

@@ -1,4 +1,4 @@
-"""Databricks-only DLT silver step. Not executed in this environment.
+"""Lakeflow (DLT) silver step; runs on Databricks (Free Edition, `free` bundle target).
 
 Vitals readings are an IMMUTABLE FACT: a heart-rate reading taken at a given
 instant never changes after the fact, there is nothing to "upsert" — a new

@@ -1,4 +1,4 @@
-"""Databricks-only DLT silver step. Not executed in this environment.
+"""Lakeflow (DLT) silver step; runs on Databricks (Free Edition, `free` bundle target).
 
 The single contract gate every Silver consumer of `bronze_patient_events`
 reads through (silver_encounters.py, silver_vitals.py). It does no

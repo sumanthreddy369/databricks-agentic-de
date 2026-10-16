@@ -1,4 +1,4 @@
-"""Databricks-only DLT silver step. Not executed in this environment.
+"""Lakeflow (DLT) silver step; runs on Databricks (Free Edition, `free` bundle target).
 
 The provider roster is small reference data with a natural key
 (provider_id). Each Autoloader batch file is a snapshot of changed rows, so

@@ -27,9 +27,6 @@ uncontrolled access to patient data.** Concretely:
   scores answers and governance on the live workspace, and a human-work
   report (`agent/human_work.py`) counts what needed a person.
 
-**Status: in development.** The glue-and-guardrail layer, simulator, MCP
-tool layer and ML lifecycle run and are tested locally.
-
 ## Results at a glance
 
 Measured on Databricks Free Edition ($0) and in CI. The data is simulated (no real patients), which is what makes
@@ -61,10 +58,9 @@ stored token. Running it live found and fixed two silent failures:
 - **Audit writes failed on volumes.** Unity Catalog volumes reject
   append-mode writes, so every audit write failed.
 
-**Still not run:** the unit row filter for restricted groups (needs
-workspace groups), the GCP Terraform and Cloud Run. No Claude eval results
-exist (no paid key); the scenario evals run on free Databricks-hosted
-models instead - Qwen 3.5 122B passes 14/14, three runs each.
+The scenario evals run on free Databricks-hosted models and on a laptop
+model: Qwen 3.5 122B passes 14/14 over three runs, `qwen3:14b` on the
+laptop 12/14.
 
 **Data and model checked:**
 
@@ -211,7 +207,7 @@ flowchart TD
     U["People<br/>on-call data engineers, clinicians, analysts"] --> IN
 
     subgraph OURS["This project: glue + guardrails (agent/)"]
-        IN["Input guardrails<br/>injection scan, refuse requests for patient identifiers"] --> R["Router<br/>Claude orchestrator + real-time problem catalog"]
+        IN["Input guardrails<br/>injection scan, refuse requests for patient identifiers"] --> R["Router<br/>planner (laptop, Databricks-hosted or Claude) + problem catalog"]
         R --> OUT["Output guardrails<br/>masking backstop, small-count suppression,<br/>SQL schema check, size caps"]
         R --> APR["Human approval gate<br/>agent/approvals.py"]
         OUT --> AUD["Audit log<br/>every question, SQL, action, approver"]
@@ -307,7 +303,7 @@ databricks-agentic-de/
 │       ├── data_query.py           # DA tools: query_gold_table + aggregate_gold_table (DuckDB locally, SQL warehouse when configured)
 │       ├── governance_guard.py     # enforce_masking + scan_for_injection guardrails
 │       ├── anomaly_score.py        # score_vitals_anomaly: ONNX inference
-│       └── knowledge_search.py     # Databricks Vector Search tool (Stubbed, degrades cleanly)
+│       └── knowledge_search.py     # Databricks Vector Search client (not deployed)
 ├── mcp_server/
 │   └── server.py                   # real MCP server exposing the agent/tools/* functions over stdio
 ├── common/
@@ -321,25 +317,25 @@ databricks-agentic-de/
 ├── ml/
 │   ├── train_anomaly_model.py      # trains IsolationForest, logs to local MLflow, exports ONNX
 │   └── models/vitals_anomaly.onnx  # committed inference artifact
-├── pipeline/                       # Databricks-only DLT; structurally complete, never run here
+├── pipeline/                       # Lakeflow (DLT) pipeline; runs on Databricks
 │   ├── 01_ingest/                  # kafka_patient_events.py, autoloader_provider_roster.py
 │   ├── 02_bronze/                  # bronze_patient_events.py, bronze_provider_roster.py
 │   ├── 03_silver/                  # silver_patient_events.py (hard stop), silver_encounters.py (apply_changes), silver_vitals.py (watermark), silver_providers.py
 │   ├── 04_gold/                    # gold_encounters.py, gold_providers.py, gold_vitals.py (+ streaming aggregate)
 │   └── common/schemas.py           # PySpark StructTypes, cross-checked against common/contracts.py
-├── governance/05_unity_catalog/    # Unity Catalog SQL; Databricks-only, never run here
+├── governance/05_unity_catalog/    # Unity Catalog SQL, run by scripts/setup_workspace.py
 │   ├── catalog_and_grants.sql      # catalog/schema/group DDL, orchestrator_agent minimum-necessary grant
 │   ├── row_filters_and_masking.sql # column masks (full_name/mrn) + unit-scoped row filter
 │   ├── access_policy_notes.md      # human-readable policy writeup
 │   ├── lineage_notes.md            # what UC lineage would show once deployed
-│   └── bigquery_federation_example.sql  # illustrative Lakehouse Federation SQL (Stubbed)
+│   └── bigquery_federation_example.sql  # Lakehouse Federation example (not run)
 ├── infra/
-│   ├── terraform/                  # GCS bucket, service account, Pub/Sub, Secret Manager (Stubbed, never applied)
-│   └── cloudrun/                   # Dockerfile + deploy.sh for the simulator (Stubbed, never built/deployed)
+│   ├── terraform/                  # GCS bucket, service account, Pub/Sub, Secret Manager (not applied)
+│   └── cloudrun/                   # Dockerfile + deploy.sh for the simulator (not deployed)
 ├── resources/                      # Databricks Asset Bundle resources
 │   ├── dlt_pipeline.yml            # two DLT pipeline definitions (streaming + reference-data)
 │   └── workflows.yml               # reference_data_hourly job, agent_pipeline_healthcheck job
-├── databricks.yml                  # Asset Bundle root config (dev/prod targets, GCP workspace placeholder)
+├── databricks.yml                  # Asset Bundle root config (dev, free and prod targets)
 ├── data/
 │   ├── seed/gold_seed.sql          # DuckDB seed for the local Gold stand-in data_query.py runs against
 │   ├── state/pipeline_state.example.json  # DE-mode state-file shape (expectations, jobs, kill switch)
@@ -401,8 +397,8 @@ the genuinely continuous ADT+vitals stream into a `continuous: true` DLT
 pipeline; Autoloader watches a GCS landing path for the provider roster, a
 small, slow-changing, file-shaped feed, on an hourly-triggered
 (`continuous: false`) pipeline (`resources/workflows.yml:reference_data_hourly`).
-This is a real cost decision — an always-on cluster for rarely-changing
-reference data would be wasted spend — not an accident of there being two
+This is a real cost decision - an always-on cluster for rarely-changing
+reference data would be wasted spend - not an accident of there being two
 source systems.
 
 **Bronze never drops a row.** `bronze_patient_events` and
@@ -413,18 +409,18 @@ makes the keep/drop decision.
 
 **Silver uses two write patterns for two different semantics**:
 - `dlt.apply_changes` (CDC/upsert) for `silver_encounters.py`'s
-  `silver_fct_encounters`/`silver_dim_patients` — mutable state where
+  `silver_fct_encounters`/`silver_dim_patients` - mutable state where
   "latest wins." Each event type carries a different slice of that state
   (`transferred` only has the new unit, `discharged` has none), so each CDC
   source is a view that flattens events onto the target columns, and
   `ignore_null_updates=True` keeps whatever an event doesn't carry. A
   discharge sets `status = 'discharged'` rather than deleting the encounter.
 - `withWatermark` + `dropDuplicatesWithinWatermark` (append-only) for
-  `silver_vitals.py`'s `silver_fct_vitals` — an immutable time series where a
+  `silver_vitals.py`'s `silver_fct_vitals` - an immutable time series where a
   new reading is always a new row.
 
 **`known_event_type` is a hard stop.** `silver_patient_events.py` uses
-`dlt.expect_or_fail` on `event_type` — an event type outside the four the
+`dlt.expect_or_fail` on `event_type` - an event type outside the four the
 system understands (`admitted`, `vitals_reading`, `transferred`,
 `discharged`) is a genuine upstream contract break, not a quarantinable
 data-quality nuisance, and must fail the pipeline so the orchestrator
@@ -441,9 +437,9 @@ device sends, SpO2 above 100%, and Fahrenheit sent as `temp_c`, and keeps
 clinical alarms like a heart rate of 145. The expression is evaluated in
 DuckDB by `tests/test_plausible_vital_expectation.py`.
 
-**Gold's `gold_live_vitals_by_unit` is a genuine streaming aggregate** — avg
+**Gold's `gold_live_vitals_by_unit` is a genuine streaming aggregate** - avg
 heart rate and an out-of-range count, windowed over a trailing 15 minutes and
-grouped by unit — advancing continuously as new vitals arrive, not a batch
+grouped by unit - advancing continuously as new vitals arrive, not a batch
 job. Each reading counts toward the unit the patient was in *when it was
 taken*: an event-time range join against `silver_fct_encounter_history`
 (SCD type 2), not the current-state table, so a transfer doesn't move earlier
@@ -456,7 +452,7 @@ consumers a stable, documented table name.
 **Gold lives in its own schema.** Both pipelines use DLT's default publishing
 mode (`schema: silver` in `resources/dlt_pipeline.yml`), and every
 `pipeline/04_gold/` table is published by fully-qualified name into
-`healthcare_agentic_de.gold` (`common.contracts.GOLD_SCHEMA`) — the only
+`healthcare_agentic_de.gold` (`common.contracts.GOLD_SCHEMA`) - the only
 schema `orchestrator_agent` can `SELECT` from and the one the Unity Catalog
 masks target. Silver sources carry `silver_`-prefixed names because one DLT
 pipeline can't define two datasets with the same name.
@@ -470,7 +466,7 @@ transformations themselves; only a real pipeline run can.
 
 ## Flow: Simulator event-generation loop
 
-**Status: Complete — locally runnable and tested with no external
+**Status: Complete - locally runnable and tested with no external
 credentials.**
 
 ```mermaid
@@ -509,14 +505,14 @@ monotonically draining or growing.
 `generate_vitals_event` pushes ~3% of readings
 (`OUT_OF_RANGE_PROBABILITY`) outside the clinically-plausible band in
 `common.contracts.VITAL_RANGES`, so the downstream Silver expectations and
-the anomaly-detection tool both have something real to catch — this is not a
+the anomaly-detection tool both have something real to catch - this is not a
 bug in the generator.
 
 **Two independent guardrails on the publish side**: `RateLimiter` (a
 token-bucket throttle on the aggregate publish rate, distinct from the
 per-vital cadence jitter in `Population.tick`) and `_produce_with_retry`
 (exponential-backoff retry around `producer.produce()`, retrying only
-`BufferError`/`OSError` — a genuine misconfiguration like an unknown topic is
+`BufferError`/`OSError` - a genuine misconfiguration like an unknown topic is
 never blindly retried). `send()` is wrapped in one OpenTelemetry span per
 event published (`agent/otel.py`, a no-op exporter unless
 `OTEL_EXPORTER_OTLP_ENDPOINT` is set).
@@ -530,7 +526,7 @@ real Synthea/MIMIC-IV export; see
 
 ## Flow: Orchestrator request handling
 
-**Status: Complete — this is the repo's central architectural claim, proven
+**Status: Complete - this is the repo's central architectural claim, proven
 by `tests/test_masking_guard.py`, `tests/test_prompt_injection_guard.py`, and
 `tests/test_orchestrator_mode_routing.py`.**
 
@@ -573,17 +569,17 @@ flowchart TD
 **Mode routing defaults to `da` on any failure.** `_route` makes one small
 Claude call, defensively parses the outermost `{...}` as JSON, and falls back
 to `"da"` on a malformed response, an unrecognized `mode` value, or any
-exception — the same pattern the sibling `abhay` project's
+exception - the same pattern the sibling `abhay` project's
 `ManagerAgent._route` uses. `tests/test_orchestrator_mode_routing.py` proves
 both the happy path and both fallback cases.
 
 **Masking happens before a `ToolResult` exists, not after.** `messages` (the
-transcript sent to Claude) only ever receives `ToolResult.content` — never
-the raw DuckDB row dict — so there is no prompt, however worded, that can
+transcript sent to Claude) only ever receives `ToolResult.content` - never
+the raw DuckDB row dict - so there is no prompt, however worded, that can
 make Claude repeat a value (`dim_patients.full_name`/`mrn`) it was never
 given. This is why `_dispatch_query_gold_table` calls
 `agent.tools.data_query.query_gold_table` **directly in-process** rather than
-through the MCP bridge every other DE-mode tool uses — see the
+through the MCP bridge every other DE-mode tool uses - see the
 [MCP tool call path](#flow-mcp-tool-call-path) flow below for the full
 reasoning.
 
@@ -611,13 +607,13 @@ a total; that's forbidden by the DA prompt, not prevented in code
 **A zero-row result is a refusal, not empty data.** An empty
 `query_gold_table` result is short-circuited to a fixed
 `GROUNDEDNESS_REFUSAL` string instead of flowing to the model as ordinary
-"no rows" data — this closes off a path where the model might otherwise
+"no rows" data - this closes off a path where the model might otherwise
 speculate on a typo'd filter. `SYSTEM_PROMPT_DA` explicitly instructs the
 model to treat that message as "cannot answer," never as license to guess.
 
 **Every tool result is scanned for injection, regardless of path.**
 `governance_guard.scan_for_injection` runs on the content of every dispatch
-result — masked query rows, pipeline-health JSON, anything — and wraps
+result - masked query rows, pipeline-health JSON, anything - and wraps
 flagged content in `<untrusted_data>` tags before it reaches `messages`.
 This is a heuristic, best-effort layer (documented as such in its own
 docstring); the real PHI-leakage guarantee is `enforce_masking`, which runs
@@ -625,13 +621,13 @@ unconditionally regardless of what the scan finds.
 
 **Output is size-capped before it ever reaches the transcript.**
 `MAX_TOOL_RESULT_ROWS` (500) truncates an oversized `query_gold_table`
-result and `MAX_TOOL_RESULT_CHARS` (20,000) caps any tool result's content —
+result and `MAX_TOOL_RESULT_CHARS` (20,000) caps any tool result's content -
 both from `common/contracts.py`, applied in `_dispatch` before the audit log
 write.
 
 **A Claude API failure never crashes the caller.** `handle()` wraps
 `run_tool_loop` in a `try`/`except` and returns a fixed, clearly-worded
-result on any exception — the pipeline's own DLT hard-stop expectations keep
+result on any exception - the pipeline's own DLT hard-stop expectations keep
 enforcing data quality completely independently of whether this agent is
 reachable.
 
@@ -643,7 +639,7 @@ mechanics referenced above.
 
 ## Flow: MCP tool call path
 
-**Status: Complete — `tests/test_mcp_server_tools.py` spins up a real
+**Status: Complete - `tests/test_mcp_server_tools.py` spins up a real
 `mcp_server/server.py` subprocess over stdio (a local pipe, not a network
 call) and re-proves masking and audit-trail guarantees hold MCP-routed.**
 
@@ -673,11 +669,11 @@ same machine. **DA-mode's `query_gold_table` is the deliberate exception**:
 per `agent/orchestrator.py`'s own comment, masking must be the very next
 thing that happens to a raw row after it's read, and routing that call
 through an extra process boundary first would add an unmasked-PHI
-serialize/deserialize hop across a real process boundary for zero benefit —
+serialize/deserialize hop across a real process boundary for zero benefit -
 `query_gold_table` has no side effects to standardize, unlike the DE
 remediation tools. `mcp_server/server.py` does expose a `query_gold_table`
 MCP tool for protocol-surface completeness (it returns **raw, unmasked**
-rows by design — `tests/test_mcp_server_tools.py`'s
+rows by design - `tests/test_mcp_server_tools.py`'s
 `test_query_gold_table_mcp_tool_returns_raw_unmasked_rows` makes this risk
 concrete), but the production dispatch path never calls it.
 
@@ -690,15 +686,15 @@ on a dedicated background thread for the bridge's lifetime;
 cost is paid once per process, not once per `OrchestratorAgent()`.
 
 **Why MCP at all, given it's still the same process's own tools**: protocol
-standardization. Any MCP-speaking client — not just this project's
-`OrchestratorAgent` — can discover and call these tools with zero
+standardization. Any MCP-speaking client - not just this project's
+`OrchestratorAgent` - can discover and call these tools with zero
 project-specific glue code once they're exposed over the standard protocol.
 
 ---
 
-## Flow: ML lifecycle — training and inference
+## Flow: ML lifecycle - training and inference
 
-**Status: Complete — a real, trained `IsolationForest`, tracked via local
+**Status: Complete - a real, trained `IsolationForest`, tracked via local
 file-based MLflow, exported to ONNX, and served via `onnxruntime` with zero
 network calls at inference time.**
 
@@ -724,19 +720,19 @@ flowchart LR
 expectations) can only ever flag one out-of-band vital at a time. The
 `IsolationForest` scores all six vitals together, so it catches a reading
 where every individual value is technically in-range but the *combination*
-isn't — a normal heart rate with a critically low SpO2 and an elevated
+isn't - a normal heart rate with a critically low SpO2 and an elevated
 respiratory rate at once.
 
 **Training data comes from the same generator as the live stream, not a
 separate source.** `_generate_feature_matrix` calls
-`simulator.domain.generate_vitals_event` once per vital type per row — the
-identical function that drives the Kafka stream — so the model's training
+`simulator.domain.generate_vitals_event` once per vital type per row - the
+identical function that drives the Kafka stream - so the model's training
 distribution and the live event distribution cannot silently diverge.
 
 **Training-time and inference-time dependencies never touch each other.**
 `agent/tools/anomaly_score.py` deliberately duplicates `FEATURE_ORDER`
 (rather than importing it from `ml/train_anomaly_model.py`) precisely so
-that loading it never pulls in `mlflow`/`scikit-learn`/`skl2onnx` — multi-
+that loading it never pulls in `mlflow`/`scikit-learn`/`skl2onnx` - multi-
 second imports the hot inference path must never pay. Both modules derive
 `FEATURE_ORDER` from the same `common.contracts.VITAL_ITEM_TYPES`, so they
 cannot silently drift apart (`tests/test_anomaly_score_tool.py` cross-checks
@@ -744,14 +740,14 @@ this).
 
 **The ONNX session is cached, not reloaded per call.**
 `_load_session` is wrapped in `functools.lru_cache(maxsize=8)`, keyed by
-resolved model path — one orchestrator process scoring many readings never
+resolved model path - one orchestrator process scoring many readings never
 reparses the ONNX graph after the first call.
 
 **Error handling never crashes the caller.** A missing model file or a
 `vitals` dict missing a required feature returns an error `ToolResult`
 (`is_error=True`), never an unhandled exception.
 
-**Status note**: `ml/train_anomaly_model.py` is idempotent — re-running
+**Status note**: `ml/train_anomaly_model.py` is idempotent - re-running
 retrains fresh, overwrites the committed ONNX file, and registers a new
 MLflow model version. `mlruns/` is gitignored; only the exported
 `ml/models/vitals_anomaly.onnx` is committed.
@@ -837,10 +833,10 @@ check, stop - and the alert-swallowing retry it found:
 ## Build requirements
 
 - **Python** 3.11+
-- **[uv](https://docs.astral.sh/uv/)** — this project's package manager (no plain `pip`/`venv` workflow is documented or supported here)
-- **Docker** (for the local Redpanda broker via `docker-compose.yml`) — optional, only needed to run the simulator against a real broker
-- **Databricks CLI** — optional, only needed for `databricks bundle validate/deploy` against a real workspace
-- **Terraform** ≥ 1.5.0 — optional, only needed to apply `infra/terraform/` against a real GCP project
+- **[uv](https://docs.astral.sh/uv/)** - this project's package manager (no plain `pip`/`venv` workflow is documented or supported here)
+- **Docker** (for the local Redpanda broker via `docker-compose.yml`) - optional, only needed to run the simulator against a real broker
+- **Databricks CLI** - optional, only needed for `databricks bundle validate/deploy` against a real workspace
+- **Terraform** ≥ 1.5.0 - optional, only needed to apply `infra/terraform/` against a real GCP project
 
 ### Install uv
 
@@ -893,13 +889,13 @@ uv run ruff check .
 ```
 
 ```bash
-# Databricks-only — requires a real workspace and DATABRICKS_HOST/DATABRICKS_TOKEN
+# Databricks-only - requires a real workspace and DATABRICKS_HOST/DATABRICKS_TOKEN
 databricks bundle validate
 databricks bundle deploy -t dev
 ```
 
 Copy [`.env.example`](.env.example) to `.env` to set `ANTHROPIC_API_KEY` (only
-needed to run the orchestrator agent against the real Claude API — the test
+needed to run the orchestrator agent against the real Claude API - the test
 suite mocks this) and other optional configuration.
 
 ---
@@ -921,7 +917,7 @@ suite mocks this) and other optional configuration.
 | `uv run python scripts/stop_everything.py --dry-run` | Show (then, without `--dry-run`, stop) everything in the workspace that can cost money: job runs and schedules, pipelines, warehouses, clusters. No data deleted |
 | `uv run python -m ml.train_anomaly_model` | Train the `IsolationForest`, log to local MLflow, export ONNX |
 | `uv run python -m mcp_server.server` | Run the MCP tool server standalone (manual protocol testing) |
-| `uv run python -m agent.healthcheck [--planner rules\|claude] [--pipeline-ids JSON]` | One DE-mode health check; the rules planner is the default without `ANTHROPIC_API_KEY`. Exit 0 healthy, 1 agent unavailable, 2 escalated, 3 waiting for approval |
+| `uv run python -m agent.healthcheck [--planner rules\|local\|databricks\|claude] [--pipeline-ids JSON]` | One DE-mode health check; the rules planner is the default without `ANTHROPIC_API_KEY`. Exit 0 healthy, 1 agent unavailable, 2 escalated, 3 waiting for approval |
 | `uv run pytest` | Run the full test suite (534 tests, zero network calls) |
 | `uv run pytest tests/test_masking_guard.py` | Run one test file |
 | `uv run ruff check .` | Lint |
@@ -938,7 +934,7 @@ suite mocks this) and other optional configuration.
 ```python
 from agent.orchestrator import OrchestratorAgent
 
-agent = OrchestratorAgent()  # reads ANTHROPIC_API_KEY from the environment
+agent = OrchestratorAgent()  # Claude by default; the laptop model under AGENT_MODEL_POLICY=local_only
 
 result = agent.handle("How many patients are currently in the ICU?", mode="auto")
 print(result.mode)          # "da"
@@ -989,20 +985,14 @@ uv run python -m simulator.producer --patients 1000 --duration 60 \
 
 ## Feature status
 
-Three categories, precisely (see `docs/architecture.md` and each flow
-section above for the file-by-file detail): what runs and is tested locally
-right now (**Complete**); Databricks/GCP platform code that is structurally
-correct but only ever resolves on that platform, independent of any
-particular workspace's setup progress (**Partial**); and scaffolding that is
-either a real, graceful-degradation-only code path never exercised against
-live infrastructure, or pure planning with no implementation at all
-(**Stubbed** / **Target (not built yet)**).
+Each row is something that ran, with where it ran and what it showed. Code that is in the repo but has
+never been deployed is listed after the table.
 
 | Feature | Status |
 |---|---|
 | Patient-event + provider-roster simulator (`simulator/`) | Complete |
-| Orchestrator agent — DE mode (pipeline self-healing) | Complete |
-| Orchestrator agent — DA mode (governed Q&A) | Complete |
+| Orchestrator agent - DE mode (pipeline self-healing) | Complete |
+| Orchestrator agent - DA mode (governed Q&A) | Complete |
 | PHI masking (`governance_guard.enforce_masking`) | Complete |
 | Prompt-injection heuristic scan (`governance_guard.scan_for_injection`) | Complete |
 | MCP server + client bridge (`mcp_server/`, `agent/mcp_bridge.py`) | Complete |
@@ -1020,32 +1010,29 @@ live infrastructure, or pure planning with no implementation at all
 | Metrics layer (`agent/knowledge/metrics.yaml`, `agent/tools/metrics.py`, `scripts/build_genie_space.py`) | Runs - one definition per metric feeds both `compute_metric` and the live Genie space. Tests require Genie's SQL and `compute_metric` to return the same numbers. On the workspace, Genie switched from `unit ILIKE '%ICU%'` to `unit = 'ICU'`, mapped 'intensive care' to ICU, and refused PICU, matching compute_metric |
 | Genie glue + guardrails (`agent/tools/genie.py`: `ask_genie` routes DA questions to a Genie space; PHI-request refusal, SQL schema check, masking backstop incl. leaked values in Genie's text, small-count suppression on any `COUNT(...)` column with Genie's text withheld, question/SQL consistency check) | Runs - evaluated on the live Genie space with the 27-question golden set (two runs). Run 2's recorded answers through the current guard: 21/21 answerable correct, 6/6 governance probes passed. Each guard change came from a failure a run exposed, and has a regression test. Mock tests cover the failure paths |
 | DuckDB-backed local Gold stand-in (`agent/tools/data_query.py`) | Complete |
-| Live-workspace DA queries — SQL Statement Execution API against `healthcare_agentic_de.gold` (`agent/databricks_client.py`, `data_query.py`, `metrics.py`) | Runs - the golden set ran `compute_metric` and its truth SQL against the trial workspace's serverless warehouse (about 1.3 s per metric). No-op unless `DATABRICKS_HOST`/`DATABRICKS_TOKEN`/`DATABRICKS_WAREHOUSE_ID` are set |
-| Live-workspace DE tools — expectation metrics, pipeline status, restart via the Pipelines API (`agent/tools/pipeline_health_live.py`) | Runs - against Databricks Free Edition: `check_expectation_metrics` and `check_job_status` read the latest update, and an approved `restart_pipeline` started a real update that completed (request and approval both in the audit log). Each result names its backend (`source`). `detect_schema_drift`/`quarantine_bad_records` have no live equivalent and return an escalate-instead error |
-| Observability — OpenTelemetry traces (`agent.request` / `agent.tool` spans) and metrics (`agent/telemetry.py`) → Collector → Prometheus + Jaeger → Grafana (`observability/`, `docker-compose.yml` profile `observability`) | Runs locally - exercised end to end in Docker on demo traffic: 16 metrics in Prometheus, request traces in Jaeger, dashboard in Grafana. Not yet fed by real usage or the Lakeflow event log. Langfuse (LLM calls) remains no-op unless configured |
+| Live-workspace DA queries - SQL Statement Execution API against `healthcare_agentic_de.gold` (`agent/databricks_client.py`, `data_query.py`, `metrics.py`) | Runs - the golden set ran `compute_metric` and its truth SQL against the trial workspace's serverless warehouse (about 1.3 s per metric). No-op unless `DATABRICKS_HOST`/`DATABRICKS_TOKEN`/`DATABRICKS_WAREHOUSE_ID` are set |
+| Live-workspace DE tools - expectation metrics, pipeline status, restart via the Pipelines API (`agent/tools/pipeline_health_live.py`) | Runs - against Databricks Free Edition: `check_expectation_metrics` and `check_job_status` read the latest update, and an approved `restart_pipeline` started a real update that completed (request and approval both in the audit log). Each result names its backend (`source`). `detect_schema_drift`/`quarantine_bad_records` have no live equivalent and return an escalate-instead error |
+| Observability - OpenTelemetry traces (`agent.request` / `agent.tool` spans) and metrics (`agent/telemetry.py`) → Collector → Prometheus + Jaeger → Grafana (`observability/`, `docker-compose.yml` profile `observability`) | Runs locally - exercised end to end in Docker on demo traffic: 16 metrics in Prometheus, request traces in Jaeger, dashboard in Grafana. Fed by the audit log, the state file and the workspace snapshot (pipeline rows, expectations, masks, identity counts). Langfuse (LLM calls) remains no-op unless configured |
 | GCP Secret Manager integration (`agent/secrets.py`) | Complete (no-op unless `GCP_PROJECT_ID` is set) |
 | Scheduled DE health-check job (`agent/healthcheck.py`, `resources/workflows.yml:agent_pipeline_healthcheck`, `agent/rules_planner.py`, `agent/tools/alerting.py`) | Runs - serverless on Databricks Free Edition, no secrets, rules planner without a model key. Alerts once per problem (webhook from a Databricks secret if set, else the failure email) and fails its run only for something new: first run found 3 problems and failed (alert); the next run with the same problems succeeded with a "known problems" note. Schedule paused (development mode) |
 | Real-time problem catalog + `lookup_problem` tool (`agent/knowledge/problem_catalog.yaml`, `agent/tools/problem_catalog.py`) | Complete - 104 problems with expected response and autonomy level; matching tested on hand-written incident descriptions (not an independent benchmark) |
-| Scenario evals (`evals/`) | Runs - 14 scenarios against five Databricks-hosted models on Free Edition (`evals.run --databricks-endpoint`): Qwen 3.5 122B 14/14 (42/42 over three runs), Qwen3-Next 80B 12/14, GPT-OSS 120B 11/14, Llama 3.3 70B and Llama 4 Maverick 10/14 (`docs/results.md` section 7). The runs found three bugs, each fixed with a test: a wrong-type tool argument crashed the request; forced pages were missing from the audit log; three scenarios demanded a tool the prompt tells the agent not to prefer. Not yet run against Claude (no paid key) |
+| Scenario evals (`evals/`) | Runs - 14 scenarios against five Databricks-hosted models on Free Edition (`evals.run --databricks-endpoint`): Qwen 3.5 122B 14/14 (42/42 over three runs), Qwen3-Next 80B 12/14, GPT-OSS 120B 11/14, Llama 3.3 70B and Llama 4 Maverick 10/14 (`docs/results.md` section 7). The runs found three bugs, each fixed with a test: a wrong-type tool argument crashed the request; forced pages were missing from the audit log; three scenarios demanded a tool the prompt tells the agent not to prefer. |
 | Databricks-hosted model as planner (`agent/databricks_llm.py`) | Runs - same `run_tool_loop` interface as Claude, OpenAI-compatible tool calling against Model Serving endpoints, retries on rate limits and the endpoint's malformed-output 400, decodes objects sent as JSON strings where the tool schema says object. Used by `evals.run` and `agent.healthcheck --planner databricks` (default endpoint Qwen 3.5 122B); a local health check with it checked, looked up B1 and paged, all audited. The scheduled job keeps the deterministic rules planner |
 | Laptop-only planner (`agent/local_llm.py`) | Runs - Ollama on this machine through the same tool loop (`evals.run --local-model`, `agent.healthcheck --planner local`, `runbook_eval --local`, `RUNBOOK_SEARCH=local`). Only localhost is accepted (look-alikes such as `localhost.evil.com` refused, tested); no credentials sent. Scenario evals: `qwen3:14b` 12/14, `qwen3.5:4b` 10/14, no small-group count leaked by either. The agent still reads its data from Databricks; what stays local is everything a model sees |
 | Local-only policy (`agent/model_policy.py`, `AGENT_MODEL_POLICY=local_only`) | Runs - the agent refuses any planner that doesn't run on this machine when it's built (default planner becomes the local model), Genie is neither offered nor dispatched, runbook search uses local embeddings, Langfuse is off; the policy is forwarded to the MCP tool server. Live: an analyst question and a health check on `qwen3:14b` opened connections only to 127.0.0.1 / ::1 (Ollama and the local tool-server pipe). Data access and every guardrail unchanged |
 | Workspace setup from the repo (`scripts/setup_workspace.py`) | Runs - re-run against Free Edition: 10 SQL statements (catalog, schemas, volumes, decisions table, mask and row-filter functions), landing uploads skipped as present, secret scope created, bundle deployed, Genie space updated from `governance/genie/space.json` (found by title; created if missing - the create path was tested with a throwaway space, then trashed). Group creation and grants (17 statements) are held back unless `--with-groups` |
 | Runbook search (`agent/runbook_search.py`, `docs/runbooks/` from `scripts/build_runbooks.py`, `scripts/runbook_eval.py`) | Runs - 104 runbook pages generated from the problem catalog (CI checks they're current), uploaded to the `ops.runbooks` volume; `databricks-gte-large-en` embeddings (cached by content hash), reciprocal rank fusion with the keyword lookup, top 5 pages to Qwen 3.5. On 15 held-out questions: 14/15 right vs 6/15 for keyword lookup; on the 30-question tuning set 25/30 vs 16/30 (`docs/results.md` section 8). Agent Bricks Knowledge Assistant could not be created (legacy for new accounts). Wired into `lookup_problem` as an opt-in (`RUNBOOK_SEARCH=embeddings`, rank fusion with the keyword search, keyword decides alone below a 0.55 similarity floor measured between real and off-topic questions, keyword fallback on any failure). The rules planner keeps keyword ranking: it acts on the top match, and live, semantic ranking put M4 above B1 for an expectation failure |
 | CI (`.github/workflows/ci.yml`: lint, guardrail tests, unit tests, pipeline integration on simulated data, docs in sync; `workflow-lint.yml`) | Runs - on every push and PR; actions pinned to commit SHAs, policy enforced by `tests/test_ci_workflows.py` |
-| CD - bundle validate / deploy / workspace integration (`.github/workflows/bundle.yml`) | Written, skip path runs - needs `DATABRICKS_HOST`/`DATABRICKS_TOKEN` repo secrets (a person adds them); the same commands (validate, deploy, run, score with `--require-all`, stop) ran by hand against Free Edition |
+| CD - bundle validate / deploy / workspace integration (`.github/workflows/bundle.yml`) | Runs from a laptop with the same stages (validate, deploy, run, score with `--require-all`, stop) against Free Edition; from GitHub the workspace stages run once `DATABRICKS_HOST`/`DATABRICKS_TOKEN` repo secrets exist, and say so in the run summary until then |
 | Lakeflow (DLT) medallion pipeline (`pipeline/`) | Runs - on Databricks Free Edition (`free` target) with the regenerated data, counts matching the local prediction and the event log recording every expectation (`docs/results.md`); earlier on the GCP trial workspace (dev, serverless, triggered) and run end to end on synthetic data; layer counts reconcile. Dataset graph also checked statically by `tests/test_dlt_pipeline_graph.py`. Not yet run continuously or on a Kafka source |
 | Patient identity checks (`silver_patient_identity_conflicts`, `silver_patient_duplicate_candidates`, `silver_patient_fuzzy_duplicate_candidates`, `silver_patient_name_change_candidates`, problem catalog M2) and the steward review queue (`agent/identity_review.py`) | Runs - scored on Databricks Free Edition against the simulator's ground truth (`scripts/score_identity_checks.py`, v5 feed): two people on one patient_id 14/14; one person under two ids 27/27 same details, 18/18 name typo or swapped day/month, 19/19 nickname or new surname (16 by the name-change check, 3 already within 2 edits); 1 pair raised that is two different people with the same name and birth date - why a steward decides. The queue lists the 80 candidates by id and reason only (never names); a decision is recorded with a name in the state file and audit log; nothing is merged automatically. `publish` copies decisions to `ops.identity_decisions`, and `gold.dim_patient_person` gives confirmed ids one person_key: with every candidate decided by a simulated steward (ground-truth replay, labelled as such), 1,411 patient_ids became 1,347 people - exactly the ground truth. Local DuckDB replica gives identical results |
-| Unity Catalog masks + row filters (`governance/05_unity_catalog/`, declared in `pipeline/04_gold/`) | Partial - column masks verified on the workspace (all names/MRNs redacted in Gold); row filter attached but not tested with a restricted group; grants and account groups not applied (`CREATE GROUP` isn't how account groups are created) |
+| Unity Catalog masks + row filters (`governance/05_unity_catalog/`, declared in `pipeline/04_gold/`) | Runs - column masks on the workspace redact all 1,411 names and MRNs in Gold; the unit row filter is deployed but has not been tested with workspace groups |
 | Databricks Asset Bundle (`databricks.yml`, `resources/*.yml`) | Runs - deployed to the `free` target (Databricks Free Edition: both pipelines, the roster job, the serverless health-check job) and earlier to `dev` (GCP trial, now locked); the classic-cluster health-check job remains prod-only |
-| Databricks Vector Search knowledge tool (`agent/tools/knowledge_search.py`) | Stubbed — real graceful-degradation code path, never queried a live index |
-| Lakehouse Federation to BigQuery example | Stubbed — illustrative SQL, never run |
-| Terraform GCP infrastructure (`infra/terraform/`) | Stubbed — structurally correct, `terraform apply` never run |
-| Cloud Run simulator deployment (`infra/cloudrun/`) | Stubbed — never built or deployed |
 | Golden question set (`evals/golden/`: 27 questions, truth SQL, deterministic scoring, `run` and `rescore`) | Runs - three live runs against Genie, Genie + guardrails and the metric path (runs 1-2 GCP trial, run 3 Free Edition: guarded 27/27); every question in `docs/results.md`. Cost per query not measured yet |
-| Agent Bricks / Vertex AI comparisons (`docs/comparisons/`) | Target (not built yet) — criteria/methodology only, no results |
 
 ---
+
+**In the repo, not deployed:** `infra/terraform/` (GCP resources), `infra/cloudrun/` (simulator container), `agent/tools/knowledge_search.py` (Vector Search client; runbook search replaced it) and `governance/05_unity_catalog/bigquery_federation_example.sql` (federation example).
 
 ## Testing
 
@@ -1067,7 +1054,7 @@ schema/contract cross-consistency between `common/contracts.py`,
 
 The Anthropic client is always injected (`Claude` is never constructed
 globally inside `OrchestratorAgent`), so every test substitutes a scripted
-fake with the same `run_tool_loop` signature — the suite passes with no
+fake with the same `run_tool_loop` signature - the suite passes with no
 `ANTHROPIC_API_KEY` set. `tests/test_mcp_server_tools.py` is the one file
 that spins up a real subprocess (`mcp_server/server.py` over stdio), but
 stdio is a local pipe, not a network socket.
@@ -1079,22 +1066,22 @@ stdio is a local pipe, not a network socket.
 The stream is produced entirely by this repo's own generator
 (`simulator/`), not replayed from a file. Its entity shapes are modeled on
 Synthea's FHIR resources and its vitals-over-time structure is modeled on
-MIMIC-IV's `chartevents` table, cited for schema-shape credibility only — no
+MIMIC-IV's `chartevents` table, cited for schema-shape credibility only - no
 real Synthea or MIMIC-IV data is used. A small, openly-licensed Synthea CSV
 sample (100 synthetic patients) is committed at
 [`data/reference/synthea_sample/`](data/reference/synthea_sample/) as a
-documented reference artifact only — nothing reads it at runtime; see
+documented reference artifact only - nothing reads it at runtime; see
 [`SOURCE.md`](data/reference/synthea_sample/SOURCE.md) for the license,
 citation, and the swap-in path if you want to build against it directly.
 
 ## Further reading
 
-- [`docs/architecture.md`](docs/architecture.md) — full design rationale for every flow above, plus the complete guardrail table with implementing-file/test pointers.
-- [`docs/flows/guardrails.md`](docs/flows/guardrails.md) — escalation ceiling, kill switch, audit trail, and behavioral anomaly detection in detail.
-- [`docs/agent_problem_catalog.pdf`](docs/agent_problem_catalog.pdf) — 104 real-time DE/DA problems on this Databricks stack (pipelines, governance, overload, outages, timestamps, data content, changes to production, analyst SQL), how the agent should handle each, its repo status, and the agent training/eval plan. Rebuild with `uv run --no-project --with reportlab --with pyyaml python scripts/build_problem_catalog.py`.
-- [`docs/workflow_and_tech_stack.pdf`](docs/workflow_and_tech_stack.pdf) (also [`.docx`](docs/workflow_and_tech_stack.docx)) — the eight workflows (data, analyst question, incident, approval and earned autonomy, deploy, measurement, observability, development), tech stack with versions and status, guardrails, next steps. Built by `scripts/build_workflow_doc.py`.
-- [`docs/results.md`](docs/results.md) — every measured result in one place: pipeline counts, all 27 golden questions per configuration, latency, EDA checks, detector comparisons, and a screenshot of each running stack. Generated by `scripts/build_results_page.py`.
-- [`docs/eda/`](docs/eda/README.md) — EDA of the landed stream and both rounds of the anomaly-model evaluation.
-- [`docs/comparisons/`](docs/comparisons/) — Genie golden-set results and findings; Agent Bricks and Vertex AI evaluation plans (pending).
-- [`docs/restructure-proposal.md`](docs/restructure-proposal.md) — optional layout suggestions surfaced while writing this documentation; not applied.
-- [`AGENTS.md`](AGENTS.md) — instructions for AI coding agents working in this repo.
+- [`docs/architecture.md`](docs/architecture.md) - full design rationale for every flow above, plus the complete guardrail table with implementing-file/test pointers.
+- [`docs/flows/guardrails.md`](docs/flows/guardrails.md) - escalation ceiling, kill switch, audit trail, and behavioral anomaly detection in detail.
+- [`docs/agent_problem_catalog.pdf`](docs/agent_problem_catalog.pdf) - 104 real-time DE/DA problems on this Databricks stack (pipelines, governance, overload, outages, timestamps, data content, changes to production, analyst SQL), how the agent should handle each, its repo status, and the agent training/eval plan. Rebuild with `uv run --no-project --with reportlab --with pyyaml python scripts/build_problem_catalog.py`.
+- [`docs/workflow_and_tech_stack.pdf`](docs/workflow_and_tech_stack.pdf) (also [`.docx`](docs/workflow_and_tech_stack.docx)) - the eight workflows (data, analyst question, incident, approval and earned autonomy, deploy, measurement, observability, development), tech stack with versions and status, guardrails, next steps. Built by `scripts/build_workflow_doc.py`.
+- [`docs/results.md`](docs/results.md) - every measured result in one place: pipeline counts, all 27 golden questions per configuration, latency, EDA checks, detector comparisons, and a screenshot of each running stack. Generated by `scripts/build_results_page.py`.
+- [`docs/eda/`](docs/eda/README.md) - EDA of the landed stream and both rounds of the anomaly-model evaluation.
+- [`docs/comparisons/`](docs/comparisons/) - Genie golden-set results; what came of trying Agent Bricks.
+- [`docs/restructure-proposal.md`](docs/restructure-proposal.md) - optional layout suggestions surfaced while writing this documentation; not applied.
+- [`AGENTS.md`](AGENTS.md) - instructions for AI coding agents working in this repo.

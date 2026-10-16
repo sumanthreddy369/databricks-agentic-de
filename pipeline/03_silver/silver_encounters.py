@@ -1,4 +1,4 @@
-"""Databricks-only DLT silver step. Not executed in this environment.
+"""Lakeflow (DLT) silver step; runs on Databricks (Free Edition, `free` bundle target).
 
 Encounters (and the patient dimension nested inside `admitted` events) are
 MUTABLE STATE: a given encounter_id transitions admitted -> transferred* ->

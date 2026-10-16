@@ -1,4 +1,4 @@
-"""Databricks-only DLT gold step. Not executed in this environment.
+"""Lakeflow (DLT) gold step; runs on Databricks (Free Edition, `free` bundle target).
 
 Published into `common.contracts.GOLD_SCHEMA` by fully-qualified name — see
 gold_encounters.py's docstring for why.

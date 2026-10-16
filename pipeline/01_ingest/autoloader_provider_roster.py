@@ -1,5 +1,5 @@
-"""Databricks-only DLT ingest step. Not executed in this environment — requires
-a real cluster with `dlt` and cloud storage credentials.
+"""Lakeflow (DLT) ingest step; runs on Databricks (deployed to Free Edition with
+the `free` bundle target).
 
 The provider roster is a slow-changing reference table (new hires, specialty
 changes) that our own simulator drops as JSON batch files into a landing

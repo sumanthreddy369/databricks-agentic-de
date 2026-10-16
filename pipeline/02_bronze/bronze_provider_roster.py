@@ -1,4 +1,4 @@
-"""Databricks-only DLT bronze step. Not executed in this environment.
+"""Lakeflow (DLT) bronze step; runs on Databricks (Free Edition, `free` bundle target).
 
 Passes the provider roster through untouched apart from an ingestion
 timestamp — same "bronze never rejects a row" rule as the patient-events

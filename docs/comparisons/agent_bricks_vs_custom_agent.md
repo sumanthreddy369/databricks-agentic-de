@@ -1,52 +1,52 @@
-# Agent Bricks vs. this project's custom orchestrator agent
+# Agent Bricks vs this project's own runbook search
 
-Databricks Agent Bricks is the platform's managed, declarative way to build
-and deploy an agent; tool/knowledge-source wiring, evaluation and serving
-are handled by the platform. In this project's direction (`docs/plan.md`),
-platform agents do the work and this repo is the glue-and-guardrail layer
-around them. So the question here is **which parts of that layer the
-platform can take over**, not whether to use Agent Bricks at all.
+The plan was to put an Agent Bricks Knowledge Assistant over the problem
+catalog (`agent/knowledge/problem_catalog.yaml`): ask it what a problem is
+and what to do, and compare it with the agent's keyword `lookup_problem`.
 
-Two concrete uses are planned:
+## What happened
 
-1. **A runbook / how-to agent:** an Agent Bricks knowledge agent over the
-   real-time problem catalog (`agent/knowledge/problem_catalog.yaml`). This
-   could replace or back our deterministic `lookup_problem` matcher.
-2. **Hosting the router itself:** running the orchestrator's routing on
-   Agent Bricks instead of our own tool loop (`agent/llm.py`,
-   `agent/orchestrator.py`). Our guardrails, approval gate and audit log
-   stay as code that wraps whatever does the routing.
+On Databricks Free Edition (2026-10-15) the Knowledge Assistant API answered
+but refused to create one: *"Knowledge Assistant is now a legacy feature. New
+instances can no longer be created for this account. Please use Genie Agents
+instead."* So the comparison couldn't be run as planned.
 
-This document is an evaluation plan, not a completed comparison. No Agent
-Bricks deployment has been built or measured for this project.
+The same idea was built from parts the workspace does offer
+(`agent/runbook_search.py`):
 
-## Why this comparison is worth doing
+- 104 runbook pages generated from the catalog (`docs/runbooks/`,
+  `scripts/build_runbooks.py`), uploaded to the `ops.runbooks` volume;
+- embeddings from the hosted `databricks-gte-large-en` endpoint, fused with
+  the keyword search by reciprocal rank;
+- the top five pages handed to a chat model, which has to start its answer
+  with the problem ID.
 
-Every piece of the layer the platform can run for us is less code to own,
-which is the point of buying before building. What has to stay ours is
-whatever the platform can't guarantee in a way we can test: masking before
-the model, the approval gate, the audit trail. Measuring both uses above
-shows where that line actually is.
+## Results
 
-## Evaluation criteria
+`scripts/runbook_eval.py`, Qwen 3.5 122B answering. A question is right when
+the top result (or the answer's `Problem <ID>:`) is one of its expected IDs.
 
-| Criterion | What "good" looks like | How it would be measured |
+| Method | 30 questions | 15 held-out questions |
 |---|---|---|
-| Setup time | Time to a deployed, working agent with the same DE-mode + DA-mode tool set | Wall-clock time, both paths, same tool functions (`agent/tools/pipeline_health.py`, `agent/tools/data_query.py`) |
-| Governance/masking enforcement | The masking-before-messages guarantee (`agent/orchestrator.py:_dispatch_query_gold_table`) holds regardless of platform | Whether Agent Bricks' tool-calling layer allows the same "mask before the LLM ever sees a raw row" architectural guarantee, or only a prompt-level instruction |
-| Answer latency | Time from request to final answer/action, p50/p95 | Same fixed DE-mode and DA-mode scenario set, timed on both |
-| Cost | $/1000 requests, including Agent Bricks' platform overhead vs. this project's direct Claude API token cost | Actual billing data from a real run of both |
-| Ability to unit-test | Can the escalation-ceiling/kill-switch/audit-trail guardrails (see `docs/architecture.md`'s Guardrails table) be proven with a mocked LLM client and zero network calls, the way `tests/` does today? | Attempt the equivalent of this project's `tests/test_escalation_ceiling.py`/`test_kill_switch.py` against an Agent Bricks-deployed agent |
-| Vendor lock-in | Portability of the tool implementations themselves off Databricks | This project's tools already run against a local JSON state file / DuckDB stand-in with no Databricks dependency at all; Agent Bricks' deployment/orchestration layer is Databricks-proprietary by definition |
+| Keyword lookup (`lookup_problem`) | 16 | 6 |
+| Embedding search | 17 | 12 |
+| Embeddings + keyword + model answer | 25 | 14 |
 
-## Status: Pending
+The held-out questions were written after the method was fixed and never
+used to tune it. Per-question results:
+[`results/runbook_eval_20261015.json`](results/runbook_eval_20261015.json),
+[`results/runbook_eval_20261015_holdout.json`](results/runbook_eval_20261015_holdout.json).
+On a laptop (Ollama: `nomic-embed-text` + `qwen3:14b`) the same pipeline got
+25 and 13.
 
-This comparison has **not** been run. It requires a real, GCP-connected
-Databricks workspace with Agent Bricks enabled, wired to the same
-`agent/tools/pipeline_health.py`/`agent/tools/data_query.py` functions (or
-their real-workspace equivalents) this project's custom orchestrator already
-uses — that workspace was still being set up as of this task and was not yet
-live in this environment. No scores, benchmarks, or "X is better than Y"
-conclusions exist yet for any row in the table above; do not treat this
-document as containing results. It will be filled in with real, measured
-numbers once that workspace is available.
+## Where it's used
+
+`lookup_problem` ranks by this search when `RUNBOOK_SEARCH=embeddings` (or
+`local` for the laptop models). Below a similarity floor (0.55 hosted, 0.64
+local - between real and off-topic questions as measured) the keyword search
+decides alone, so an unknown problem still gets "no catalog match, escalate".
+The scheduled health check keeps keyword ranking: it acts on the top match,
+and in a live run the semantic ranking put M4 above B1 for an expectation
+failure.
+
+Genie Agents, the suggested replacement, weren't tried.
