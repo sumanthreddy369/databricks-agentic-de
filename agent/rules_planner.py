@@ -38,6 +38,7 @@ def _short(name: str) -> str:
 
 
 class RulesPlanner:
+    runs_locally = True  # no model at all: allowed under AGENT_MODEL_POLICY=local_only
     def run_tool_loop(self, system, messages, tools, dispatch, max_turns=6) -> str:
         expectations = _load(dispatch("check_expectation_metrics", {}))
         jobs = _load(dispatch("check_job_status", {}))

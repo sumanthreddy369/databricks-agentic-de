@@ -237,6 +237,8 @@ def _semantic_search(query: str, limit: int, index=None) -> list[dict] | None:
     """Catalog problems ranked by embedding similarity, or None when semantic
     ranking is off or unavailable (the caller then uses keyword search)."""
     mode = os.environ.get("RUNBOOK_SEARCH")
+    if mode == "embeddings" and os.environ.get("AGENT_MODEL_POLICY", "").strip().lower() == "local_only":
+        mode = "local"  # never the hosted embedding model under local_only
     if index is None and mode not in ("embeddings", "local"):
         return None
     global _semantic_index

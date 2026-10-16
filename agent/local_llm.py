@@ -31,6 +31,7 @@ def require_local(base_url: str) -> str:
 
 
 class LocalModel(DatabricksModel):
+    runs_locally = True  # allowed under AGENT_MODEL_POLICY=local_only
     def __init__(
         self,
         model: str = DEFAULT_LOCAL_MODEL,

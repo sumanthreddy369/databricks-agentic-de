@@ -41,6 +41,7 @@ from agent.tools import pipeline_health
 
 
 class _NoModel:
+    runs_locally = True  # never calls a model
     """Approvals never involve the model; fail loudly if anything tries."""
 
     def run_tool_loop(self, *args, **kwargs):

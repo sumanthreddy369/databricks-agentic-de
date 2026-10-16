@@ -73,7 +73,10 @@ class Tracer:
     ) -> None:
         public_key = public_key or os.environ.get("LANGFUSE_PUBLIC_KEY")
         secret_key = secret_key or os.environ.get("LANGFUSE_SECRET_KEY")
-        self.enabled = bool(public_key and secret_key)
+        from agent import model_policy
+
+        # Off under local_only: Langfuse receives per-turn metadata on its servers.
+        self.enabled = bool(public_key and secret_key) and not model_policy.local_only()
         self._client = None
         if self.enabled:
             # Imported lazily: only reached when real credentials are

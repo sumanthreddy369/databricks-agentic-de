@@ -58,7 +58,7 @@ from typing import Literal
 
 import structlog
 
-from agent import autonomy, otel
+from agent import autonomy, model_policy, otel
 from agent.llm import Claude, ToolResult
 from agent.mcp_bridge import MCPToolBridge, get_default_bridge
 from agent.prompts import MODE_ROUTER_PROMPT, SYSTEM_PROMPT_DA, SYSTEM_PROMPT_DE
@@ -325,7 +325,10 @@ class OrchestratorAgent:
         audit_log_path: Path | str | None = None,
         mcp_bridge: MCPToolBridge | None = None,
     ) -> None:
-        self.claude = claude if claude is not None else Claude()
+        self.claude = claude if claude is not None else model_policy.default_planner()
+        # AGENT_MODEL_POLICY=local_only: refuse a planner that doesn't run on
+        # this machine, before it can see anything (agent/model_policy.py).
+        model_policy.check_planner(self.claude)
         # Absolute, because this path is handed to the MCP server subprocess,
         # whose working directory is the package location (the repo root
         # from source, site-packages from an installed wheel), not ours. A
@@ -376,6 +379,8 @@ class OrchestratorAgent:
             system, tools = SYSTEM_PROMPT_DE, DE_TOOLS
         else:
             system, tools = SYSTEM_PROMPT_DA, DA_TOOLS
+            if model_policy.local_only():  # Genie is a model outside this machine
+                tools = [t for t in tools if t["name"] != "ask_genie"]
 
         messages = [{"role": "user", "content": request}]
         try:
@@ -456,6 +461,18 @@ class OrchestratorAgent:
             result = self._dispatch_aggregate_gold_table(tool_input)
         elif tool_name == "compute_metric":
             result = self._dispatch_compute_metric(tool_input)
+        elif tool_name == "ask_genie" and model_policy.local_only():
+            # Not offered under local_only; refused here too in case it's asked for anyway.
+            result = ToolResult(
+                tool_use_id="",
+                content=json.dumps(
+                    {
+                        "error": "Genie is off: AGENT_MODEL_POLICY=local_only keeps every model call on this "
+                        "machine. Answer with compute_metric or aggregate_gold_table."
+                    }
+                ),
+                is_error=True,
+            )
         elif tool_name == "ask_genie":
             # In-process, like the other DA tools: Genie's raw rows go straight
             # into ask_genie's own masking backstop before a ToolResult exists.

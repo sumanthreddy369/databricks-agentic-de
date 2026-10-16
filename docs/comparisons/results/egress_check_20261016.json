@@ -1,0 +1,38 @@
+{
+  "policy": "local_only",
+  "runs": [
+    {
+      "request": "How many patients are currently in the ICU?",
+      "mode": "da",
+      "planner": "LocalModel (qwen3:14b)",
+      "tool_calls": [
+        "compute_metric"
+      ],
+      "answer": "The current census in the ICU (patients with in-progress encounters) is suppressed because the group size is fewer than 11 patients. This is a platform-level safeguard to protect privacy. The metric was calculated using encounters with status \"in-progress\" and unit \"ICU\" from the `fct_encounters` ta",
+      "connections": {
+        "::1:11434": 1,
+        "127.0.0.1:11434": 1
+      }
+    },
+    {
+      "request": "Scheduled pipeline health check.",
+      "mode": "de",
+      "planner": "LocalModel (qwen3:14b)",
+      "tool_calls": [
+        "check_expectation_metrics",
+        "check_job_status",
+        "detect_schema_drift"
+      ],
+      "answer": "The pipeline health check found no issues: all expectation metrics passed, jobs are running/successful, and there's no schema drift. No action required.",
+      "connections": {
+        "127.0.0.1:59808": 1
+      }
+    }
+  ],
+  "all_destinations": [
+    "127.0.0.1:11434",
+    "127.0.0.1:59808",
+    "::1:11434"
+  ],
+  "only_this_machine": true
+}

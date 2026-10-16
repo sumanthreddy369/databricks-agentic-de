@@ -61,6 +61,8 @@ ANALYST_REQUESTS = [
 class ScriptedModel:
     """Stands in for agent.llm.Claude: dispatches a fixed tool sequence."""
 
+    runs_locally = True  # no model: fine under AGENT_MODEL_POLICY=local_only
+
     def __init__(self, steps, answer="Done (scripted demo)."):
         self.steps, self.answer = steps, answer
 
